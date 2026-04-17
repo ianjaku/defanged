@@ -51,6 +51,13 @@ export class KeyError extends InterpreterError {
   }
 }
 
+export class ValueError extends InterpreterError {
+  constructor(message: string, line: number, column: number) {
+    super(message, line, column);
+    this.name = 'ValueError';
+  }
+}
+
 export class ZeroDivisionError extends InterpreterError {
   constructor(line: number, column: number) {
     super('Division by zero', line, column);

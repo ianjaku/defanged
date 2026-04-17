@@ -39,7 +39,6 @@ bun run typecheck
 
 - `Assignment.targets: Expression[]` — supports chained assignment (`x = y = 5`). Iterate and assign the single evaluated value to each target.
 - Lambdas use `expression()` for their body, which can conflict with enclosing comma contexts.
-- `str.count()` currently passes its arg into `new RegExp` without escaping — regex metacharacters (`.`, `*`, etc.) misbehave. Fix with `replace(/[.*+?^${}()|[\]\\]/g, '\\$&')` or switch to `split().length - 1`.
 - `int()` uses `Math.floor`, which is wrong for negatives. CPython's `int()` truncates toward zero — use `Math.trunc`.
 
 ## Commit style

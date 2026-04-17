@@ -1,6 +1,6 @@
 # tespy-parser: Feature Support Matrix
 
-A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**491 pass / 21 fail** as of 2026-04-17).
+A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**505 pass / 7 fail** as of 2026-04-17).
 
 Explanations are written for TypeScript developers who may not know Python.
 
@@ -10,7 +10,6 @@ Explanations are written for TypeScript developers who may not know Python.
 
 - [✅ Working Features](#-working-features)
 - [❌ Broken or Missing Features](#-broken-or-missing-features)
-  - [Missing string methods](#missing-string-methods)
   - [Runtime bugs](#runtime-bugs)
 - [TypeScript ↔ Python cheat sheet](#typescript--python-cheat-sheet)
 
@@ -42,22 +41,28 @@ let x = __tmp, y = __tmp;
 ```
 Note the shared-reference caveat with mutable values: `a = b = []` means `a` and `b` point to the same list, so `a.append(1)` changes `b` too.
 
-### Most string methods
+### String methods
 
 | Method | Does | TS analogue |
 |---|---|---|
 | `s.upper()` / `s.lower()` | Uppercase / lowercase | `s.toUpperCase()` / `s.toLowerCase()` |
-| `s.strip()` | Trim whitespace | `s.trim()` |
-| `s.strip(chars)` | Trim specific chars from both ends | no direct equivalent |
+| `s.strip()` / `s.lstrip()` / `s.rstrip()` | Trim whitespace (both/left/right) | `s.trim()` / `s.trimStart()` / `s.trimEnd()` |
+| `s.strip(chars)` / `s.lstrip(chars)` / `s.rstrip(chars)` | Trim specific chars | no direct equivalent |
 | `s.replace(old, new)` | Replace all occurrences | `s.replaceAll(old, new)` |
+| `s.replace(old, new, count)` | Replace first `count` occurrences | no direct equivalent |
 | `s.split(sep)` | Split into list | `s.split(sep)` |
+| `s.split(sep, maxsplit)` | Split with limit (remainder kept) | no direct equivalent (TS `limit` truncates) |
 | `s.startswith(x)` / `s.endswith(x)` | Prefix / suffix check | `s.startsWith(x)` / `s.endsWith(x)` |
 | `s.find(x)` | Index of substring, `-1` if missing | `s.indexOf(x)` |
-| `s.count(x)` | Count non-overlapping occurrences | no direct equivalent (**buggy with regex chars, see below**) |
+| `s.rfind(x)` | Last index of substring, `-1` if missing | `s.lastIndexOf(x)` |
+| `s.index(x)` | Like `find()`, but throws `ValueError` if missing | `s.indexOf(x)` + manual throw |
+| `s.count(x)` | Count non-overlapping occurrences | no direct equivalent |
 | `s.join(list)` | Join list with `s` as separator | `list.join(s)` (note: args reversed) |
 | `s.isdigit()` / `s.isalpha()` / `s.isalnum()` | Character-class predicates | regex equivalent |
+| `s.isspace()` | True if non-empty and all whitespace | `/^\s+$/.test(s)` |
 | `s.title()` / `s.capitalize()` / `s.swapcase()` | Case transforms | no direct equivalent |
 | `s.zfill(n)` | Pad left with zeros | `s.padStart(n, '0')` |
+| `s.ljust(n)` / `s.rjust(n)` / `s.center(n)` | Pad right / left / both sides | `s.padEnd(n)` / `s.padStart(n)` / — |
 | `s.format(...)` | Named/positional placeholder substitution | template literals |
 | `s * n` | Repeat string `n` times | `s.repeat(n)` |
 
@@ -179,67 +184,31 @@ Triple-quoted strings work: `"""multi\nline"""`.
 
 ## ❌ Broken or Missing Features
 
-### Missing string methods
-
-All of these throw `AttributeError: 'str' object has no attribute '<method>'`.
-
-| Method | What it does | TS analogue |
-|---|---|---|
-| `s.lstrip()` | Trim whitespace from the **left** only | `s.trimStart()` |
-| `s.rstrip()` | Trim whitespace from the **right** only | `s.trimEnd()` |
-| `s.lstrip(chars)` | Trim specified chars from the left | — |
-| `s.rstrip(chars)` | Trim specified chars from the right | — |
-| `s.index(sub)` | Like `find()`, but **throws `ValueError` if not found** instead of returning -1 | `s.indexOf(sub)` + manual throw |
-| `s.rfind(sub)` | Last index of substring, `-1` if missing | `s.lastIndexOf(sub)` |
-| `s.isspace()` | True if string is non-empty and all whitespace | `/^\s+$/.test(s)` |
-| `s.split(sep, maxsplit)` | Split, but stop after `maxsplit` splits | `s.split(sep, limit)` — but note: TS `limit` **truncates**, Python `maxsplit` keeps the remainder as the last element |
-| `s.ljust(n, fill=' ')` | Pad right until length `n` | `s.padEnd(n, fill)` |
-| `s.rjust(n, fill=' ')` | Pad left until length `n` | `s.padStart(n, fill)` |
-| `s.center(n, fill=' ')` | Pad both sides to center the string | — |
-| `s.replace(old, new, count)` | Replace **only the first `count` occurrences** | no direct equivalent |
-
-**Note on `split(sep, maxsplit)`:**
-```python
-"a,b,c,d".split(",", 2)    # → ["a", "b", "c,d"]   (Python: remainder preserved)
-"a,b,c,d".split(",").slice(0, 3)   # TS equivalent, roughly
-```
-
----
-
 ### Runtime bugs
 
 These parse but produce wrong results or crashes.
 
-#### 1. `str.count()` treats input as a regex pattern
-```python
-"a.b.c".count(".")     # should be 2 (count literal dots)
-                       # actually returns 5 (. matches every char)
-```
-**Root cause:** the implementation passes the argument to `new RegExp(pattern)` without escaping regex metacharacters. `.`, `*`, `+`, `(`, `)`, `[`, `]`, `?`, `^`, `$`, `|`, `\` will all misbehave.
-
-**Fix:** escape with `pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')` before building the RegExp, or use `split(sub).length - 1`.
-
-#### 2. `int()` truncates in the wrong direction
+#### 1. `int()` truncates in the wrong direction
 ```python
 int(-3.9)   # should be -3 (Python truncates toward zero)
             # actually returns -4 (JS Math.floor rounds toward -Infinity)
 ```
 Python's `int()` applied to a float truncates toward zero — like TS's `Math.trunc()`. The interpreter uses `Math.floor()`, which gives a different answer for negatives. (`Math.floor(-3.9) === -4`, `Math.trunc(-3.9) === -3`.)
 
-#### 3. `int()` silently accepts float strings
+#### 2. `int()` silently accepts float strings
 ```python
 int("3.14")   # should raise ValueError: invalid literal for int()
               # actually returns 3
 ```
 In Python, `int(str)` only accepts strings that represent whole integers (e.g. `"42"`, `"-5"`). Decimal strings must go through `float()` first: `int(float("3.14"))`. The current implementation uses JS `parseInt`, which stops reading at the `.` and returns `3` instead of raising.
 
-#### 4. `sorted()` does not accept strings
+#### 3. `sorted()` does not accept strings
 ```python
 sorted("cba")    # should return ['a', 'b', 'c'] (iterate string chars)
 ```
 In Python, strings are iterable (each character is an element), so `sorted("cba")` returns a list of sorted characters. The `sorted` built-in in this interpreter rejects strings with `TypeError: 'string' object is not iterable`.
 
-#### 5. F-strings with nested matching quotes
+#### 4. F-strings with nested matching quotes
 ```python
 f'{"big" if x > 3 else "small"}'
 ```
@@ -247,7 +216,7 @@ This should work: the f-string uses single quotes on the outside, double quotes 
 
 **Workaround:** if you need this pattern, assign to a variable first and interpolate.
 
-#### 6. F-string format specs are ignored
+#### 5. F-string format specs are ignored
 ```python
 x = 3.14159
 f"{x:.2f}"     # should be "3.14"
@@ -257,14 +226,14 @@ f"{n:>10}"     # alignment / width — ignored
 ```
 The `:<spec>` portion of an f-string placeholder controls formatting (precision, width, alignment, base). Roughly equivalent to `x.toFixed(2)` in TS for `:.2f`. The implementation currently strips or ignores the spec and just interpolates the value's default string form.
 
-#### 7. Boolean arithmetic
+#### 6. Boolean arithmetic
 ```python
 True + 1       # should be 2 (bool is a subclass of int in Python)
 sum([True, False, True])   # should be 2
 ```
 In Python, `bool` inherits from `int` — `True` acts as `1` and `False` as `0` in arithmetic. In TS, `true + 1 === 2` works because of coercion. The interpreter rejects boolean operands in `+`, probably by strict type checking in the binary op handler.
 
-#### 8. Lambdas containing function calls, used as kwarg values
+#### 7. Lambdas containing function calls, used as kwarg values
 ```python
 sorted(['banana', 'apple'], key=lambda x: len(x))
 ```

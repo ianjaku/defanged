@@ -45,6 +45,7 @@ import {
   TypeError,
   IndexError,
   KeyError,
+  ValueError,
   ZeroDivisionError,
   MaxIterationsError,
 } from './errors';
@@ -1210,18 +1211,56 @@ export class Interpreter {
         name: 'str.strip',
         fn: (chars?: PyValue) => {
           if (chars && isString(chars)) {
-            const pattern = new RegExp(`^[${chars.value}]+|[${chars.value}]+$`, 'g');
+            const escaped = chars.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const pattern = new RegExp(`^[${escaped}]+|[${escaped}]+$`, 'g');
             return pyString(str.replace(pattern, ''));
           }
           return pyString(str.trim());
         },
       },
+      lstrip: {
+        type: 'builtin',
+        name: 'str.lstrip',
+        fn: (chars?: PyValue) => {
+          if (chars && isString(chars)) {
+            const escaped = chars.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const pattern = new RegExp(`^[${escaped}]+`);
+            return pyString(str.replace(pattern, ''));
+          }
+          return pyString(str.replace(/^\s+/, ''));
+        },
+      },
+      rstrip: {
+        type: 'builtin',
+        name: 'str.rstrip',
+        fn: (chars?: PyValue) => {
+          if (chars && isString(chars)) {
+            const escaped = chars.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const pattern = new RegExp(`[${escaped}]+$`);
+            return pyString(str.replace(pattern, ''));
+          }
+          return pyString(str.replace(/\s+$/, ''));
+        },
+      },
       split: {
         type: 'builtin',
         name: 'str.split',
-        fn: (sep?: PyValue) => {
+        fn: (sep?: PyValue, maxsplit?: PyValue) => {
+          const limit = maxsplit && isNumber(maxsplit) ? Math.floor(maxsplit.value) : -1;
           if (sep && isString(sep)) {
-            return pyList(str.split(sep.value).map(s => pyString(s)));
+            if (limit < 0) {
+              return pyList(str.split(sep.value).map(s => pyString(s)));
+            }
+            const parts: string[] = [];
+            let remaining = str;
+            for (let i = 0; i < limit; i++) {
+              const idx = remaining.indexOf(sep.value);
+              if (idx === -1) break;
+              parts.push(remaining.slice(0, idx));
+              remaining = remaining.slice(idx + sep.value.length);
+            }
+            parts.push(remaining);
+            return pyList(parts.map(s => pyString(s)));
           }
           return pyList(str.split(/\s+/).filter(s => s).map(s => pyString(s)));
         },
@@ -1248,9 +1287,22 @@ export class Interpreter {
       replace: {
         type: 'builtin',
         name: 'str.replace',
-        fn: (old: PyValue, newStr: PyValue) => {
+        fn: (old: PyValue, newStr: PyValue, count?: PyValue) => {
           if (!isString(old) || !isString(newStr)) {
             throw new TypeError('replace() arguments must be strings', line, column);
+          }
+          if (count && isNumber(count)) {
+            let result = str;
+            let n = Math.floor(count.value);
+            let start = 0;
+            while (n > 0) {
+              const idx = result.indexOf(old.value, start);
+              if (idx === -1) break;
+              result = result.slice(0, idx) + newStr.value + result.slice(idx + old.value.length);
+              start = idx + newStr.value.length;
+              n--;
+            }
+            return pyString(result);
           }
           return pyString(str.split(old.value).join(newStr.value));
         },
@@ -1284,7 +1336,16 @@ export class Interpreter {
         name: 'str.count',
         fn: (sub: PyValue) => {
           if (!isString(sub)) throw new TypeError('count() arg must be str', line, column);
-          return pyNumber((str.match(new RegExp(sub.value, 'g')) || []).length);
+          if (sub.value === '') return pyNumber(str.length + 1);
+          let count = 0;
+          let pos = 0;
+          while (true) {
+            const idx = str.indexOf(sub.value, pos);
+            if (idx === -1) break;
+            count++;
+            pos = idx + sub.value.length;
+          }
+          return pyNumber(count);
         },
       },
       isdigit: {
@@ -1296,6 +1357,73 @@ export class Interpreter {
         type: 'builtin',
         name: 'str.isalpha',
         fn: () => pyBoolean(str.length > 0 && /^[a-zA-Z]+$/.test(str)),
+      },
+      isalnum: {
+        type: 'builtin',
+        name: 'str.isalnum',
+        fn: () => pyBoolean(str.length > 0 && /^[a-zA-Z0-9]+$/.test(str)),
+      },
+      isspace: {
+        type: 'builtin',
+        name: 'str.isspace',
+        fn: () => pyBoolean(str.length > 0 && /^\s+$/.test(str)),
+      },
+      swapcase: {
+        type: 'builtin',
+        name: 'str.swapcase',
+        fn: () => pyString(str.split('').map(c =>
+          c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase()
+        ).join('')),
+      },
+      index: {
+        type: 'builtin',
+        name: 'str.index',
+        fn: (sub: PyValue) => {
+          if (!isString(sub)) throw new TypeError('index() arg must be str', line, column);
+          const idx = str.indexOf(sub.value);
+          if (idx === -1) throw new ValueError('substring not found', line, column);
+          return pyNumber(idx);
+        },
+      },
+      rfind: {
+        type: 'builtin',
+        name: 'str.rfind',
+        fn: (sub: PyValue) => {
+          if (!isString(sub)) throw new TypeError('rfind() arg must be str', line, column);
+          return pyNumber(str.lastIndexOf(sub.value));
+        },
+      },
+      ljust: {
+        type: 'builtin',
+        name: 'str.ljust',
+        fn: (width: PyValue, fill?: PyValue) => {
+          if (!isNumber(width)) throw new TypeError('ljust() argument must be an integer', line, column);
+          const fillChar = fill && isString(fill) ? fill.value : ' ';
+          return pyString(str.padEnd(Math.floor(width.value), fillChar));
+        },
+      },
+      rjust: {
+        type: 'builtin',
+        name: 'str.rjust',
+        fn: (width: PyValue, fill?: PyValue) => {
+          if (!isNumber(width)) throw new TypeError('rjust() argument must be an integer', line, column);
+          const fillChar = fill && isString(fill) ? fill.value : ' ';
+          return pyString(str.padStart(Math.floor(width.value), fillChar));
+        },
+      },
+      center: {
+        type: 'builtin',
+        name: 'str.center',
+        fn: (width: PyValue, fill?: PyValue) => {
+          if (!isNumber(width)) throw new TypeError('center() argument must be an integer', line, column);
+          const w = Math.floor(width.value);
+          const fillChar = fill && isString(fill) ? fill.value : ' ';
+          if (str.length >= w) return pyString(str);
+          const total = w - str.length;
+          const left = Math.floor(total / 2);
+          const right = total - left;
+          return pyString(fillChar.repeat(left) + str + fillChar.repeat(right));
+        },
       },
       format: {
         type: 'builtin',
@@ -1831,7 +1959,7 @@ export class Interpreter {
     
     // Map our error types to Python exception names
     const errorTypeMap: Record<string, string[]> = {
-      'Exception': ['TypeError', 'NameError', 'KeyError', 'IndexError', 'ZeroDivisionError', 'ValueError', 'SyntaxError'],
+      'Exception': ['TypeError', 'NameError', 'KeyError', 'IndexError', 'ZeroDivisionError', 'ValueError', 'SyntaxError', 'AttributeError'],
       'TypeError': ['TypeError'],
       'NameError': ['NameError'],
       'KeyError': ['KeyError'],
@@ -1839,6 +1967,7 @@ export class Interpreter {
       'ZeroDivisionError': ['ZeroDivisionError'],
       'ValueError': ['ValueError'],
       'SyntaxError': ['SyntaxError'],
+      'AttributeError': ['AttributeError'],
     };
     
     // Get the actual error type name from our error classes
