@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.png" alt="defang logo" width="200" />
+  <img src="logo.png" alt="defang logo" width="600" />
 </p>
 
 # defang
