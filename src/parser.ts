@@ -309,7 +309,22 @@ export class Parser {
     let value: Expression | null = null;
 
     if (!this.check(TokenType.NEWLINE) && !this.isAtEnd()) {
-      value = this.expression();
+      const first = this.expression();
+      if (this.check(TokenType.COMMA)) {
+        const elements: Expression[] = [first];
+        while (this.match(TokenType.COMMA)) {
+          if (this.check(TokenType.NEWLINE) || this.isAtEnd()) break;
+          elements.push(this.expression());
+        }
+        value = {
+          type: 'Tuple',
+          elements,
+          line: first.line,
+          column: first.column,
+        };
+      } else {
+        value = first;
+      }
     }
 
     this.consumeNewline();
@@ -450,6 +465,61 @@ export class Parser {
   private assignmentOrExpression(): Statement {
     const expr = this.expression();
 
+    // Check for comma (potential tuple unpacking or implicit tuple expression)
+    if (this.check(TokenType.COMMA) && !this.isAtEnd()) {
+      const elements: Expression[] = [expr];
+      while (this.match(TokenType.COMMA)) {
+        if (this.check(TokenType.ASSIGN) || this.check(TokenType.NEWLINE) || this.isAtEnd()) break;
+        elements.push(this.expression());
+      }
+
+      // Tuple unpacking assignment: a, b = 1, 2
+      if (this.match(TokenType.ASSIGN)) {
+        const target: Expression = elements.length === 1 ? elements[0] : {
+          type: 'Tuple',
+          elements,
+          line: expr.line,
+          column: expr.column,
+        };
+        // Parse the RHS, which may also be comma-separated (implicit tuple)
+        const firstVal = this.expression();
+        const valElements: Expression[] = [firstVal];
+        while (this.match(TokenType.COMMA)) {
+          if (this.check(TokenType.NEWLINE) || this.isAtEnd()) break;
+          valElements.push(this.expression());
+        }
+        const value: Expression = valElements.length === 1 ? valElements[0] : {
+          type: 'Tuple',
+          elements: valElements,
+          line: firstVal.line,
+          column: firstVal.column,
+        };
+        this.consumeNewline();
+        return {
+          type: 'Assignment',
+          targets: [target],
+          value,
+          line: expr.line,
+          column: expr.column,
+        };
+      }
+
+      // Implicit tuple expression statement: (not assignment)
+      const tupleExpr: Expression = {
+        type: 'Tuple',
+        elements,
+        line: expr.line,
+        column: expr.column,
+      };
+      this.consumeNewline();
+      return {
+        type: 'ExpressionStmt',
+        expression: tupleExpr,
+        line: expr.line,
+        column: expr.column,
+      };
+    }
+
     // Check for assignment (supports chained: x = y = z = value)
     if (this.match(TokenType.ASSIGN)) {
       const targets: Expression[] = [expr];
@@ -515,6 +585,45 @@ export class Parser {
         type: 'AugmentedAssignment',
         target: expr,
         op: '/=',
+        value,
+        line: expr.line,
+        column: expr.column,
+      };
+    }
+
+    if (this.match(TokenType.DOUBLE_SLASH_ASSIGN)) {
+      const value = this.expression();
+      this.consumeNewline();
+      return {
+        type: 'AugmentedAssignment',
+        target: expr,
+        op: '//=',
+        value,
+        line: expr.line,
+        column: expr.column,
+      };
+    }
+
+    if (this.match(TokenType.PERCENT_ASSIGN)) {
+      const value = this.expression();
+      this.consumeNewline();
+      return {
+        type: 'AugmentedAssignment',
+        target: expr,
+        op: '%=',
+        value,
+        line: expr.line,
+        column: expr.column,
+      };
+    }
+
+    if (this.match(TokenType.DOUBLE_STAR_ASSIGN)) {
+      const value = this.expression();
+      this.consumeNewline();
+      return {
+        type: 'AugmentedAssignment',
+        target: expr,
+        op: '**=',
         value,
         line: expr.line,
         column: expr.column,
@@ -1052,43 +1161,63 @@ export class Parser {
       };
     }
 
-    const firstKey = this.expression();
-    this.consume(TokenType.COLON, "Expected ':' after dict key");
-    const firstValue = this.expression();
+    const firstExpr = this.expression();
 
-    // Check for dict comprehension
+    // Set comprehension: {expr for ...}
     if (this.check(TokenType.FOR)) {
       const generators = this.comprehensionGenerators();
-      this.consume(TokenType.RBRACE, "Expected '}' after dict comprehension");
+      this.consume(TokenType.RBRACE, "Expected '}' after set comprehension");
       return {
-        type: 'DictComp',
-        key: firstKey,
-        value: firstValue,
+        type: 'SetComp',
+        element: firstExpr,
         generators,
         line: startToken.line,
         column: startToken.column,
       };
     }
 
-    // Regular dict
-    const keys = [firstKey];
-    const values = [firstValue];
+    // Dict: {key: value, ...} or dict comprehension: {k: v for ...}
+    if (this.match(TokenType.COLON)) {
+      const firstValue = this.expression();
 
-    while (this.match(TokenType.COMMA)) {
-      if (this.check(TokenType.RBRACE)) break;
-      keys.push(this.expression());
-      this.consume(TokenType.COLON, "Expected ':' after dict key");
-      values.push(this.expression());
+      // Check for dict comprehension
+      if (this.check(TokenType.FOR)) {
+        const generators = this.comprehensionGenerators();
+        this.consume(TokenType.RBRACE, "Expected '}' after dict comprehension");
+        return {
+          type: 'DictComp',
+          key: firstExpr,
+          value: firstValue,
+          generators,
+          line: startToken.line,
+          column: startToken.column,
+        };
+      }
+
+      // Regular dict
+      const keys = [firstExpr];
+      const values = [firstValue];
+
+      while (this.match(TokenType.COMMA)) {
+        if (this.check(TokenType.RBRACE)) break;
+        keys.push(this.expression());
+        this.consume(TokenType.COLON, "Expected ':' after dict key");
+        values.push(this.expression());
+      }
+
+      this.consume(TokenType.RBRACE, "Expected '}' after dict");
+      return {
+        type: 'Dict',
+        keys,
+        values,
+        line: startToken.line,
+        column: startToken.column,
+      };
     }
 
-    this.consume(TokenType.RBRACE, "Expected '}' after dict");
-    return {
-      type: 'Dict',
-      keys,
-      values,
-      line: startToken.line,
-      column: startToken.column,
-    };
+    // Set literal: {expr, expr, ...} — but we don't have set literals yet,
+    // so this is an error for now
+    throw new SyntaxError("Expected ':' after dict key or 'for' for set comprehension", startToken.line, startToken.column);
   }
 
   private comprehensionGenerators(): Comprehension[] {

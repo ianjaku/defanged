@@ -435,17 +435,28 @@ export class Lexer {
         else { type = TokenType.MINUS; }
         break;
       case '*':
-        if (next === '*') { this.advance(); type = TokenType.DOUBLE_STAR; consumed = true; }
+        if (next === '*') {
+          this.advance();
+          if (this.peek() === '=') { this.advance(); type = TokenType.DOUBLE_STAR_ASSIGN; }
+          else { type = TokenType.DOUBLE_STAR; }
+          consumed = true;
+        }
         else if (next === '=') { this.advance(); type = TokenType.STAR_ASSIGN; consumed = true; }
         else { type = TokenType.STAR; }
         break;
       case '/':
-        if (next === '/') { this.advance(); type = TokenType.DOUBLE_SLASH; consumed = true; }
+        if (next === '/') {
+          this.advance();
+          if (this.peek() === '=') { this.advance(); type = TokenType.DOUBLE_SLASH_ASSIGN; }
+          else { type = TokenType.DOUBLE_SLASH; }
+          consumed = true;
+        }
         else if (next === '=') { this.advance(); type = TokenType.SLASH_ASSIGN; consumed = true; }
         else { type = TokenType.SLASH; }
         break;
       case '%':
-        type = TokenType.PERCENT;
+        if (next === '=') { this.advance(); type = TokenType.PERCENT_ASSIGN; consumed = true; }
+        else { type = TokenType.PERCENT; }
         break;
       case '=':
         if (next === '=') { this.advance(); type = TokenType.EQ; consumed = true; }

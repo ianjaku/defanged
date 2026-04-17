@@ -1,6 +1,6 @@
 # tespy-parser: Feature Support Matrix
 
-A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**186 pass / 34 fail** as of 2026-04-17).
+A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**491 pass / 21 fail** as of 2026-04-17).
 
 Explanations are written for TypeScript developers who may not know Python.
 
@@ -10,7 +10,6 @@ Explanations are written for TypeScript developers who may not know Python.
 
 - [✅ Working Features](#-working-features)
 - [❌ Broken or Missing Features](#-broken-or-missing-features)
-  - [Parser gaps](#parser-gaps)
   - [Missing string methods](#missing-string-methods)
   - [Runtime bugs](#runtime-bugs)
 - [TypeScript ↔ Python cheat sheet](#typescript--python-cheat-sheet)
@@ -19,14 +18,17 @@ Explanations are written for TypeScript developers who may not know Python.
 
 ## ✅ Working Features
 
-### Basic augmented assignment
+### Augmented assignment
 ```python
 x += 1    # works  (like TS: x += 1)
 x -= 1    # works
 x *= 2    # works
 x /= 2    # works
+x //= 3   # floor-divide and assign
+x %= 3    # modulo and assign
+x **= 2   # power and assign
 ```
-Python's `+=`, `-=`, `*=`, `/=` behave like the TypeScript equivalents.
+Python's `+=`, `-=`, `*=`, `/=`, `//=`, `%=`, `**=` behave like the TypeScript equivalents (with `//` being floor division, which has no TS operator).
 
 ### Chained assignment
 ```python
@@ -68,18 +70,22 @@ Note the shared-reference caveat with mutable values: `a = b = []` means `a` and
 
 Python has no separate `int` vs. `float` types in TS's sense — both are JS `number` internally, but Python prints `1` vs. `1.0` differently. The interpreter preserves that distinction.
 
-### Tuples (mostly)
+### Tuples
 ```python
 t = (1, 2, 3)       # immutable list — like `readonly [1, 2, 3]` in TS
 t[0]                # 1
 len(t)              # 3
 1 in t              # True
-a, b, c = t         # destructuring (works in *function bodies*, see broken features for top-level)
+a, b, c = t         # destructuring — works everywhere (statements, for loops, function bodies)
+a, b = 1, 2         # implicit tuple unpacking
+a, b = b, a         # swap values
+a, b, c = [10, 20, 30]  # destructure from list
+(1, 2) + (3, 4)     # tuple concatenation → (1, 2, 3, 4)
 ```
 A tuple is conceptually a fixed-size, immutable array. Python uses them for multi-return values:
 ```python
 def divmod(a, b):
-    return a // b, a % b   # returns a tuple
+    return a // b, a % b   # returns a tuple (implicit return tuple works)
 ```
 
 ### Lists and list methods
@@ -147,8 +153,14 @@ f"{[x for x in range(3)]}"        # "[0, 1, 2]"
 ```
 F-strings are like TS template literals (`` `hello ${name}` ``), but use `{...}` instead of `${...}`.
 
-### Set comprehensions behave like sets when created via `set()`
-`set([1, 1, 2])` → `{1, 2}` works. But **set-literal comprehensions** (`{x for x in ...}`) do not — see broken features.
+### Sets
+`set([1, 1, 2])` → `{1, 2}` works. Set-literal comprehensions also work:
+```python
+{x for x in range(3)}          # {0, 1, 2}
+{x for x in [1, 1, 2]}         # {1, 2} (deduplicates)
+{x for x in range(10) if x > 5}  # {6, 7, 8, 9} (with condition)
+```
+Set comprehensions are like list comprehensions but produce a `set` (deduplicated, unordered). No direct TS equivalent; roughly `new Set(array.map(fn))`.
 
 ### Multiline strings
 Triple-quoted strings work: `"""multi\nline"""`.
@@ -166,46 +178,6 @@ Triple-quoted strings work: `"""multi\nline"""`.
 ---
 
 ## ❌ Broken or Missing Features
-
-### Parser gaps
-
-These produce `SyntaxError` — the parser does not recognize the syntax.
-
-#### 1. Extended augmented assignments
-```python
-x //= 3    # floor-divide and assign
-x %= 3     # modulo and assign
-x **= 2    # power and assign
-```
-Python supports `//=`, `%=`, and `**=` (analogous to `/=` and `*=`). **The parser only handles the common four** (`+=`, `-=`, `*=`, `/=`). These three are unrecognized tokens.
-
-**What they should do:** same as `x = x // 3`, `x = x % 3`, `x = x ** 2`.
-
-#### 2. Tuple unpacking at statement level
-```python
-a, b = 1, 2              # swap-style multi-assignment
-a, b, c = [10, 20, 30]   # destructure from list
-a, b = b, a              # swap values
-a, (b, c) = 1, (2, 3)    # nested destructuring
-```
-All of these fail. Equivalent TS destructuring works fine: `const [a, b] = [1, 2]`. The parser does not allow comma-separated targets on the left side of `=`.
-
-**Note:** tuple unpacking works inside function parameters and `for` loops — just not as a statement.
-
-#### 3. Tuple concatenation
-```python
-(1, 2) + (3, 4)   # should produce (1, 2, 3, 4)
-```
-Tuples should concatenate with `+` the same way lists do. In TS: `[...[1,2], ...[3,4]]`. Currently fails.
-
-#### 4. Set-literal comprehensions
-```python
-{x for x in range(3)}          # should be {0, 1, 2}
-{x for x in [1, 1, 2]}         # should be {1, 2} (dedupes)
-```
-The parser sees `{` and assumes a dict literal, so it demands a `:` after the first element. A set comprehension is distinguished from a dict comprehension by the absence of `:`. There is no direct TS equivalent; roughly: `new Set(range(3).map(x => x))`.
-
----
 
 ### Missing string methods
 
@@ -327,7 +299,7 @@ Quick reference for the most confusing translations:
 | `def f(a, b=10): ...` | `function f(a, b = 10) { ... }` | default args |
 | `*args` | `...args` (rest) | |
 | `**kwargs` | `...rest` into an object | Python separates positional rest and keyword rest |
-| `a, b = 1, 2` | `const [a, b] = [1, 2]` | **NOT SUPPORTED at top level** in this interpreter |
+| `a, b = 1, 2` | `const [a, b] = [1, 2]` | works everywhere (statements, for loops, functions) |
 | `raise Exception("x")` | `throw new Error("x")` | |
 | `try: ... except E: ...` | `try { ... } catch (e) { if (e instanceof E) ... }` | |
 | `f"{x}"` | `` `${x}` `` | f-string / template literal |
@@ -338,4 +310,4 @@ Quick reference for the most confusing translations:
 
 ---
 
-*Generated from `tests/features.test.ts` against commit `89de649`.*
+*Generated from `tests/features.test.ts` against commit `a2c3413`.*

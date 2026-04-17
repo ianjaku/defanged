@@ -150,6 +150,15 @@ export class Interpreter {
           case '/=':
             result = this.binaryOp('/', current, operand, stmt.line, stmt.column);
             break;
+          case '//=':
+            result = this.binaryOp('//', current, operand, stmt.line, stmt.column);
+            break;
+          case '%=':
+            result = this.binaryOp('%', current, operand, stmt.line, stmt.column);
+            break;
+          case '**=':
+            result = this.binaryOp('**', current, operand, stmt.line, stmt.column);
+            break;
           default:
             throw new InterpreterError(`Unknown augmented assignment operator: ${stmt.op}`, stmt.line, stmt.column);
         }
@@ -546,6 +555,10 @@ export class Interpreter {
         return await this.evaluateDictComp(expr.key, expr.value, expr.generators, env);
       }
 
+      case 'SetComp': {
+        return await this.evaluateSetComp(expr.element, expr.generators, env);
+      }
+
       case 'GeneratorExp': {
         return await this.evaluateGeneratorExp(expr.element, expr.generators, env);
       }
@@ -626,6 +639,22 @@ export class Interpreter {
     return pyDict(entries);
   }
 
+  private async evaluateSetComp(
+    element: Expression,
+    generators: Comprehension[],
+    env: Environment
+  ): Promise<PyValue> {
+    const values = new Set<string | number | boolean>();
+    await this.evaluateComprehension(generators, 0, env, async (innerEnv) => {
+      const val = await this.evaluate(element, innerEnv);
+      if (!isString(val) && !isNumber(val) && !isBoolean(val)) {
+        throw new TypeError(`unhashable type: '${val.type}'`, element.line, element.column);
+      }
+      values.add(val.value);
+    });
+    return pySet(values);
+  }
+
   private async evaluateGeneratorExp(
     element: Expression,
     generators: Comprehension[],
@@ -690,6 +719,11 @@ export class Interpreter {
     // List concatenation
     if (op === '+' && isList(left) && isList(right)) {
       return pyList([...left.elements, ...right.elements]);
+    }
+
+    // Tuple concatenation
+    if (op === '+' && isTuple(left) && isTuple(right)) {
+      return pyTuple([...left.elements, ...right.elements]);
     }
 
     // List repetition

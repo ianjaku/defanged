@@ -1,0 +1,56 @@
+{
+  "name": "defang",
+  "version": "0.1.0",
+  "description": "A sandboxed Python interpreter written in TypeScript. Safely run Python code emitted by LLMs and agents — no filesystem, no network, no escape.",
+  "keywords": [
+    "python",
+    "interpreter",
+    "sandbox",
+    "ai",
+    "agent",
+    "llm",
+    "claude",
+    "code-execution",
+    "safe-eval"
+  ],
+  "homepage": "https://github.com/ianjaku/defang#readme",
+  "bugs": {
+    "url": "https://github.com/ianjaku/defang/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ianjaku/defang.git"
+  },
+  "license": "MIT",
+  "author": "Ian Jakubek <ian@invacto.com>",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "FEATURES.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir ./dist --target node --format esm && tsc --emitDeclarationOnly --declaration --outDir dist",
+    "test": "bun test",
+    "test:features": "bun test tests/features.test.ts",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "bun run build"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.4.0"
+  }
+}

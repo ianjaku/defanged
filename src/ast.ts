@@ -117,6 +117,12 @@ export interface DictComp extends ASTNode {
   generators: Comprehension[];
 }
 
+export interface SetComp extends ASTNode {
+  type: 'SetComp';
+  element: Expression;
+  generators: Comprehension[];
+}
+
 export interface GeneratorExp extends ASTNode {
   type: 'GeneratorExp';
   element: Expression;
@@ -177,6 +183,7 @@ export type Expression =
   | Tuple
   | ListComp
   | DictComp
+  | SetComp
   | GeneratorExp
   | Ternary
   | Lambda
@@ -199,7 +206,7 @@ export interface Assignment extends ASTNode {
 export interface AugmentedAssignment extends ASTNode {
   type: 'AugmentedAssignment';
   target: Expression;
-  op: '+=' | '-=' | '*=' | '/=';
+  op: '+=' | '-=' | '*=' | '/=' | '//=' | '%=' | '**=';
   value: Expression;
 }
 

@@ -61,6 +61,9 @@ export enum TokenType {
   MINUS_ASSIGN = 'MINUS_ASSIGN',   // -=
   STAR_ASSIGN = 'STAR_ASSIGN',     // *=
   SLASH_ASSIGN = 'SLASH_ASSIGN',   // /=
+  DOUBLE_SLASH_ASSIGN = 'DOUBLE_SLASH_ASSIGN', // //=
+  PERCENT_ASSIGN = 'PERCENT_ASSIGN',           // %=
+  DOUBLE_STAR_ASSIGN = 'DOUBLE_STAR_ASSIGN',   // **=
 
   // Delimiters
   LPAREN = 'LPAREN',       // (
