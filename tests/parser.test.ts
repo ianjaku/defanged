@@ -322,7 +322,15 @@ describe('Parser', () => {
     test('assignment', () => {
       const ast = parse('x = 42');
       expect(ast[0].type).toBe('Assignment');
-      expect((ast[0] as any).target.name).toBe('x');
+      expect((ast[0] as any).targets).toHaveLength(1);
+      expect((ast[0] as any).targets[0].name).toBe('x');
+      expect((ast[0] as any).value.value).toBe(42);
+    });
+
+    test('chained assignment', () => {
+      const ast = parse('x = y = 42');
+      expect(ast[0].type).toBe('Assignment');
+      expect((ast[0] as any).targets.map((t: any) => t.name)).toEqual(['x', 'y']);
       expect((ast[0] as any).value.value).toBe(42);
     });
 

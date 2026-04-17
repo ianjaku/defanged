@@ -192,7 +192,7 @@ export interface ExpressionStmt extends ASTNode {
 
 export interface Assignment extends ASTNode {
   type: 'Assignment';
-  target: Expression;
+  targets: Expression[];
   value: Expression;
 }
 

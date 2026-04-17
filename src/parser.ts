@@ -450,13 +450,18 @@ export class Parser {
   private assignmentOrExpression(): Statement {
     const expr = this.expression();
 
-    // Check for assignment
+    // Check for assignment (supports chained: x = y = z = value)
     if (this.match(TokenType.ASSIGN)) {
-      const value = this.expression();
+      const targets: Expression[] = [expr];
+      let value = this.expression();
+      while (this.match(TokenType.ASSIGN)) {
+        targets.push(value);
+        value = this.expression();
+      }
       this.consumeNewline();
       return {
         type: 'Assignment',
-        target: expr,
+        targets,
         value,
         line: expr.line,
         column: expr.column,

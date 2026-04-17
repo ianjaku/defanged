@@ -126,7 +126,9 @@ export class Interpreter {
 
       case 'Assignment': {
         const value = await this.evaluate(stmt.value, env);
-        await this.assignTarget(stmt.target, value, env);
+        for (const target of stmt.targets) {
+          await this.assignTarget(target, value, env);
+        }
         return pyNone();
       }
 
