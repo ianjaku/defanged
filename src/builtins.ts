@@ -26,7 +26,7 @@ import {
   isTruthy,
   valueToJs,
 } from './values';
-import { TypeError } from './errors';
+import { TypeError, ValueError } from './errors';
 
 /** Type guard for kwargs object */
 function isKwargs(val: PyValue | PyKwargs): val is PyKwargs {
@@ -400,13 +400,13 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
     name: 'int',
     fn: (obj?: PyValue): PyValue => {
       if (obj === undefined) return pyNumber(0);
-      if (isNumber(obj)) return pyNumber(Math.floor(obj.value));
+      if (isNumber(obj)) return pyNumber(Math.trunc(obj.value));
       if (isString(obj)) {
-        const n = parseInt(obj.value, 10);
-        if (isNaN(n)) {
-          throw new TypeError(`invalid literal for int() with base 10: '${obj.value}'`, 0, 0);
+        const trimmed = obj.value.trim();
+        if (!/^[+-]?\d+$/.test(trimmed)) {
+          throw new ValueError(`invalid literal for int() with base 10: '${obj.value}'`, 0, 0);
         }
-        return pyNumber(n);
+        return pyNumber(parseInt(trimmed, 10));
       }
       if (obj.type === 'boolean') return pyNumber(obj.value ? 1 : 0);
       throw new TypeError(`int() argument must be a string or a number, not '${obj.type}'`, 0, 0);

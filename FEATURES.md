@@ -1,6 +1,6 @@
 # tespy-parser: Feature Support Matrix
 
-A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**505 pass / 7 fail** as of 2026-04-17).
+A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**507 pass / 5 fail** as of 2026-04-18).
 
 Explanations are written for TypeScript developers who may not know Python.
 
@@ -66,12 +66,14 @@ Note the shared-reference caveat with mutable values: `a = b = []` means `a` and
 | `s.format(...)` | Named/positional placeholder substitution | template literals |
 | `s * n` | Repeat string `n` times | `s.repeat(n)` |
 
-### `str()`, `float()`, and partial `int()` conversions
+### `str()`, `float()`, and `int()` conversions
 - `str(123)` → `"123"` — like `String(123)` in TS
 - `str(True)` → `"True"` (note: Python capitalizes booleans)
 - `str([1, 2])` → `"[1, 2]"` (prints list representation)
 - `float("3.14")` → `3.14`, `float(5)` → `5.0`
 - `int("42")` → `42`, `int(True)` → `1`
+- `int(-3.9)` → `-3` (truncates toward zero, like CPython)
+- `int("3.14")` → raises `ValueError` (only whole-integer strings accepted)
 
 Python has no separate `int` vs. `float` types in TS's sense — both are JS `number` internally, but Python prints `1` vs. `1.0` differently. The interpreter preserves that distinction.
 
@@ -188,27 +190,13 @@ Triple-quoted strings work: `"""multi\nline"""`.
 
 These parse but produce wrong results or crashes.
 
-#### 1. `int()` truncates in the wrong direction
-```python
-int(-3.9)   # should be -3 (Python truncates toward zero)
-            # actually returns -4 (JS Math.floor rounds toward -Infinity)
-```
-Python's `int()` applied to a float truncates toward zero — like TS's `Math.trunc()`. The interpreter uses `Math.floor()`, which gives a different answer for negatives. (`Math.floor(-3.9) === -4`, `Math.trunc(-3.9) === -3`.)
-
-#### 2. `int()` silently accepts float strings
-```python
-int("3.14")   # should raise ValueError: invalid literal for int()
-              # actually returns 3
-```
-In Python, `int(str)` only accepts strings that represent whole integers (e.g. `"42"`, `"-5"`). Decimal strings must go through `float()` first: `int(float("3.14"))`. The current implementation uses JS `parseInt`, which stops reading at the `.` and returns `3` instead of raising.
-
-#### 3. `sorted()` does not accept strings
+#### 1. `sorted()` does not accept strings
 ```python
 sorted("cba")    # should return ['a', 'b', 'c'] (iterate string chars)
 ```
 In Python, strings are iterable (each character is an element), so `sorted("cba")` returns a list of sorted characters. The `sorted` built-in in this interpreter rejects strings with `TypeError: 'string' object is not iterable`.
 
-#### 4. F-strings with nested matching quotes
+#### 2. F-strings with nested matching quotes
 ```python
 f'{"big" if x > 3 else "small"}'
 ```
@@ -216,7 +204,7 @@ This should work: the f-string uses single quotes on the outside, double quotes 
 
 **Workaround:** if you need this pattern, assign to a variable first and interpolate.
 
-#### 5. F-string format specs are ignored
+#### 3. F-string format specs are ignored
 ```python
 x = 3.14159
 f"{x:.2f}"     # should be "3.14"
@@ -226,14 +214,14 @@ f"{n:>10}"     # alignment / width — ignored
 ```
 The `:<spec>` portion of an f-string placeholder controls formatting (precision, width, alignment, base). Roughly equivalent to `x.toFixed(2)` in TS for `:.2f`. The implementation currently strips or ignores the spec and just interpolates the value's default string form.
 
-#### 6. Boolean arithmetic
+#### 4. Boolean arithmetic
 ```python
 True + 1       # should be 2 (bool is a subclass of int in Python)
 sum([True, False, True])   # should be 2
 ```
 In Python, `bool` inherits from `int` — `True` acts as `1` and `False` as `0` in arithmetic. In TS, `true + 1 === 2` works because of coercion. The interpreter rejects boolean operands in `+`, probably by strict type checking in the binary op handler.
 
-#### 7. Lambdas containing function calls, used as kwarg values
+#### 5. Lambdas containing function calls, used as kwarg values
 ```python
 sorted(['banana', 'apple'], key=lambda x: len(x))
 ```
