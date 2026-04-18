@@ -1,6 +1,6 @@
 # tespy-parser: Feature Support Matrix
 
-A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**507 pass / 5 fail** as of 2026-04-18).
+A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**508 pass / 4 fail** as of 2026-04-18).
 
 Explanations are written for TypeScript developers who may not know Python.
 
@@ -149,7 +149,7 @@ Dict comprehensions (`{k: v for k, v in items}`) also work.
 - Short-circuit `and` / `or` (note: they return the operand, not a boolean — like `&&` / `||` in TS)
 
 ### Built-ins
-Working: `len`, `range`, `print`, `abs`, `min`, `max`, `sum`, `round`, `sorted` *(on lists/tuples)*, `reversed`, `enumerate`, `zip`, `map`, `filter`, `any`, `all`, `type`, `isinstance`, `hex`, `oct`, `bin`, `ord`, `chr`, `repr`.
+Working: `len`, `range`, `print`, `abs`, `min`, `max`, `sum`, `round`, `sorted` *(on lists, tuples, dicts, and strings)*, `reversed`, `enumerate`, `zip`, `map`, `filter`, `any`, `all`, `type`, `isinstance`, `hex`, `oct`, `bin`, `ord`, `chr`, `repr`.
 
 ### F-strings (most cases)
 ```python
@@ -190,13 +190,7 @@ Triple-quoted strings work: `"""multi\nline"""`.
 
 These parse but produce wrong results or crashes.
 
-#### 1. `sorted()` does not accept strings
-```python
-sorted("cba")    # should return ['a', 'b', 'c'] (iterate string chars)
-```
-In Python, strings are iterable (each character is an element), so `sorted("cba")` returns a list of sorted characters. The `sorted` built-in in this interpreter rejects strings with `TypeError: 'string' object is not iterable`.
-
-#### 2. F-strings with nested matching quotes
+#### 1. F-strings with nested matching quotes
 ```python
 f'{"big" if x > 3 else "small"}'
 ```
@@ -204,7 +198,7 @@ This should work: the f-string uses single quotes on the outside, double quotes 
 
 **Workaround:** if you need this pattern, assign to a variable first and interpolate.
 
-#### 3. F-string format specs are ignored
+#### 2. F-string format specs are ignored
 ```python
 x = 3.14159
 f"{x:.2f}"     # should be "3.14"
@@ -214,14 +208,14 @@ f"{n:>10}"     # alignment / width — ignored
 ```
 The `:<spec>` portion of an f-string placeholder controls formatting (precision, width, alignment, base). Roughly equivalent to `x.toFixed(2)` in TS for `:.2f`. The implementation currently strips or ignores the spec and just interpolates the value's default string form.
 
-#### 4. Boolean arithmetic
+#### 3. Boolean arithmetic
 ```python
 True + 1       # should be 2 (bool is a subclass of int in Python)
 sum([True, False, True])   # should be 2
 ```
 In Python, `bool` inherits from `int` — `True` acts as `1` and `False` as `0` in arithmetic. In TS, `true + 1 === 2` works because of coercion. The interpreter rejects boolean operands in `+`, probably by strict type checking in the binary op handler.
 
-#### 5. Lambdas containing function calls, used as kwarg values
+#### 4. Lambdas containing function calls, used as kwarg values
 ```python
 sorted(['banana', 'apple'], key=lambda x: len(x))
 ```

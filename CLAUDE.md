@@ -22,6 +22,7 @@ Supporting files: `src/ast.ts` (node types), `src/values.ts` (runtime values), `
 1. **Never widen the safety boundary.** No `import`, `exec`, `eval`, `open`, `compile`, `__import__`, filesystem, network, or subprocess. These features don't exist and shouldn't be added. If data needs to come in from the outside, it goes through `ToolDefinition`.
 2. **Tests are the spec.** `tests/features.test.ts` documents behavioral expectations. Before changing semantics, add or update a test that pins the new behavior.
 3. **Match CPython.** Don't invent Python. If unsure, verify in `python3 -c "..."`.
+4. **Always use Bun** instead of npm
 
 ## Running things
 
@@ -42,4 +43,4 @@ bun run typecheck
 
 ## Commit style
 
-Short imperative subject line, blank line, then a paragraph or two explaining the *why*. Don't mention AI authorship in commit messages; the README already handles disclosure project-wide. Write commit messages that sound natural and human. No `Co-Authored-By` trailers.
+Short imperative subject line, blank line, then a paragraph or two explaining the _why_. Don't mention AI authorship in commit messages; the README already handles disclosure project-wide. Write commit messages that sound natural and human. No `Co-Authored-By` trailers.

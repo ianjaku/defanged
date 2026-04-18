@@ -29,7 +29,7 @@ export async function runPython(
 }
 
 /**
- * Generate a system prompt for Claude based on available tools
+ * Generate a system prompt based on available tools
  */
 export function generateToolsPrompt(tools: ToolDefinition[]): string {
   const toolDescriptions = tools.map(tool => {
@@ -49,4 +49,3 @@ result
 
 The last expression in your code will be returned as the result.`;
 }
-

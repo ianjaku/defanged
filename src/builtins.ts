@@ -615,10 +615,12 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
         items = [...iterable.elements];
       } else if (iterable.type === 'iterator') {
         items = [...iterable.values];
+      } else if (isString(iterable)) {
+        items = iterable.value.split('').map(c => pyString(c));
       } else if (isDict(iterable)) {
-        items = Array.from(iterable.entries.keys()).map(k => 
-          typeof k === 'string' ? pyString(k) : 
-          typeof k === 'number' ? pyNumber(k) : 
+        items = Array.from(iterable.entries.keys()).map(k =>
+          typeof k === 'string' ? pyString(k) :
+          typeof k === 'number' ? pyNumber(k) :
           pyBoolean(k as boolean)
         );
       } else {
