@@ -1,6 +1,6 @@
 # tespy-parser: Feature Support Matrix
 
-A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**508 pass / 4 fail** as of 2026-04-18).
+A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**512 pass / 0 fail** as of 2026-04-17).
 
 Explanations are written for TypeScript developers who may not know Python.
 
@@ -9,8 +9,6 @@ Explanations are written for TypeScript developers who may not know Python.
 ## Table of Contents
 
 - [✅ Working Features](#-working-features)
-- [❌ Broken or Missing Features](#-broken-or-missing-features)
-  - [Runtime bugs](#runtime-bugs)
 - [TypeScript ↔ Python cheat sheet](#typescript--python-cheat-sheet)
 
 ---
@@ -182,50 +180,37 @@ Triple-quoted strings work: `"""multi\nline"""`.
 - Functions capture their enclosing scope (lexical scoping, same as TS).
 - `global` and `nonlocal` keywords work.
 
----
-
-## ❌ Broken or Missing Features
-
-### Runtime bugs
-
-These parse but produce wrong results or crashes.
-
-#### 1. F-strings with nested matching quotes
+### F-strings with nested quotes
 ```python
-f'{"big" if x > 3 else "small"}'
+f'{"big" if x > 3 else "small"}'   # works — double quotes inside single-quoted f-string
+f"{'hello'}"                        # works — single quotes inside double-quoted f-string
 ```
-This should work: the f-string uses single quotes on the outside, double quotes for the nested literals inside `{...}`. The parser fails with "Unterminated expression in f-string" because it does not track nesting / quote state properly inside the expression braces.
+F-string expressions can contain string literals using a different quote character from the f-string's delimiter, just like in CPython 3.12+.
 
-**Workaround:** if you need this pattern, assign to a variable first and interpolate.
-
-#### 2. F-string format specs are ignored
+### F-string format specs
 ```python
-x = 3.14159
-f"{x:.2f}"     # should be "3.14"
-               # actually returns "3.14159"
-f"{n:d}"       # integer formatting — ignored
-f"{n:>10}"     # alignment / width — ignored
+f"{3.14159:.2f}"   # "3.14"   — like x.toFixed(2) in TS
+f"{42:d}"          # "42"     — integer format
+f"{42:08b}"        # "00101010" — binary, zero-padded to width 8
+f"{255:x}"         # "ff"     — hex
+f"{'hi':>10}"      # "        hi" — right-aligned in width 10
 ```
-The `:<spec>` portion of an f-string placeholder controls formatting (precision, width, alignment, base). Roughly equivalent to `x.toFixed(2)` in TS for `:.2f`. The implementation currently strips or ignores the spec and just interpolates the value's default string form.
+The `:<spec>` portion supports precision (`.Nf`), type (`d`, `f`, `b`, `o`, `x`, `X`, `e`, `E`), width, alignment (`<`, `>`, `^`), and zero-fill.
 
-#### 3. Boolean arithmetic
+### Boolean arithmetic
 ```python
-True + 1       # should be 2 (bool is a subclass of int in Python)
-sum([True, False, True])   # should be 2
+True + 1               # 2  (bool is a subclass of int in Python)
+False + 1              # 1
+sum([True, False, True])  # 2
+True * 5               # 5
 ```
-In Python, `bool` inherits from `int` — `True` acts as `1` and `False` as `0` in arithmetic. In TS, `true + 1 === 2` works because of coercion. The interpreter rejects boolean operands in `+`, probably by strict type checking in the binary op handler.
+In Python, `bool` inherits from `int` — `True` acts as `1` and `False` as `0` in all arithmetic. In TS, `true + 1 === 2` works because of coercion; Python does the same via class hierarchy.
 
-#### 4. Lambdas containing function calls, used as kwarg values
+### Lambda as keyword argument
 ```python
-sorted(['banana', 'apple'], key=lambda x: len(x))
+sorted(['banana', 'apple'], key=lambda x: len(x))  # ['apple', 'banana']
 ```
-This pattern — lambda body contains a function call, lambda is passed as a keyword argument inside another call — fails with a SyntaxError. Likely a parser issue where the lambda body's termination condition conflicts with the enclosing argument list's comma/paren tracking.
-
-**Workaround:** assign the lambda to a variable first, then pass it:
-```python
-key_fn = lambda x: len(x)
-sorted(['banana', 'apple'], key=key_fn)
-```
+Lambdas with function calls in their bodies can be passed directly as keyword arguments (e.g., `key=`). No need to assign to a variable first.
 
 ---
 

@@ -38,7 +38,7 @@ import {
   jsToValue,
   valueToJs,
 } from './values';
-import { createBuiltins, PrintCallback } from './builtins';
+import { createBuiltins, PrintCallback, compareValues } from './builtins';
 import { getStringMethod, getListMethod, getDictMethod, getSetMethod, getHashableItems } from './methods';
 import {
   InterpreterError,
@@ -590,7 +590,11 @@ export class Interpreter {
           result += part.text;
           if (part.expr) {
             const value = await this.evaluate(part.expr, env);
-            result += pyStr(value);
+            if (part.formatSpec) {
+              result += applyFormatSpec(value, part.formatSpec);
+            } else {
+              result += pyStr(value);
+            }
           }
         }
         return pyString(result);
@@ -705,6 +709,14 @@ export class Interpreter {
   }
 
   private binaryOp(op: string, left: PyValue, right: PyValue, line: number, column: number): PyValue {
+    // Bool-as-int coercion: Python's bool is a subclass of int
+    if (isBoolean(left) && (isNumber(right) || isBoolean(right))) {
+      left = pyNumber(left.value ? 1 : 0);
+    }
+    if (isBoolean(right) && (isNumber(left) || isBoolean(right))) {
+      right = pyNumber(right.value ? 1 : 0);
+    }
+
     // String concatenation
     if (op === '+' && isString(left) && isString(right)) {
       return pyString(left.value + right.value);
@@ -876,9 +888,9 @@ export class Interpreter {
     if (func.type === 'builtin') {
       // Handle special builtins that need interpreter access
       if ((func as any).requiresInterpreter) {
-        return await this.handleSpecialBuiltin(func.name, args, line, column);
+        return await this.handleSpecialBuiltin(func.name, args, kwargs, line, column);
       }
-      
+
       // Pass kwargs to builtins that accept them
       if (func.acceptsKwargs) {
         return await func.fn(...args, { type: 'kwargs' as const, values: kwargs });
@@ -932,10 +944,82 @@ export class Interpreter {
   private async handleSpecialBuiltin(
     name: string,
     args: PyValue[],
+    kwargs: Record<string, PyValue>,
     line: number,
     column: number
   ): Promise<PyValue> {
     switch (name) {
+      case 'sorted': {
+        if (args.length === 0) {
+          throw new TypeError('sorted expected 1 argument, got 0', line, column);
+        }
+        const iterable = args[0];
+        let items: PyValue[];
+        if (isList(iterable) || isTuple(iterable)) {
+          items = [...iterable.elements];
+        } else if (iterable.type === 'iterator') {
+          items = [...iterable.values];
+        } else if (isString(iterable)) {
+          items = iterable.value.split('').map(c => pyString(c));
+        } else if (isDict(iterable)) {
+          items = Array.from(iterable.entries.keys()).map(k =>
+            typeof k === 'string' ? pyString(k) :
+            typeof k === 'number' ? pyNumber(k) :
+            pyBoolean(k as boolean)
+          );
+        } else {
+          throw new TypeError(`'${iterable.type}' object is not iterable`, line, column);
+        }
+        const keyFunc = kwargs.key;
+        const reverse = kwargs.reverse?.type === 'boolean' && (kwargs.reverse as any).value;
+        if (keyFunc && (keyFunc.type === 'function' || keyFunc.type === 'builtin')) {
+          const keyed: { item: PyValue; key: PyValue }[] = [];
+          for (const item of items) {
+            keyed.push({ item, key: await this.call(keyFunc, [item], {}, line, column) });
+          }
+          keyed.sort((a, b) => compareValues(a.key, b.key));
+          items = keyed.map(x => x.item);
+        } else {
+          items.sort((a, b) => compareValues(a, b));
+        }
+        if (reverse) items.reverse();
+        return pyList(items);
+      }
+
+      case 'min':
+      case 'max': {
+        const keyFunc = kwargs.key;
+        let items: PyValue[];
+        if (args.length === 1 && isIterable(args[0])) {
+          items = this.getIterableItems(args[0], line, column);
+        } else {
+          items = args;
+        }
+        if (items.length === 0) {
+          throw new TypeError(`${name}() arg is an empty sequence`, line, column);
+        }
+        const isMax = name === 'max';
+        if (keyFunc && (keyFunc.type === 'function' || keyFunc.type === 'builtin')) {
+          let best = items[0];
+          let bestKey = await this.call(keyFunc, [best], {}, line, column);
+          for (let i = 1; i < items.length; i++) {
+            const k = await this.call(keyFunc, [items[i]], {}, line, column);
+            if (isMax ? compareValues(k, bestKey) > 0 : compareValues(k, bestKey) < 0) {
+              best = items[i];
+              bestKey = k;
+            }
+          }
+          return best;
+        }
+        let best = items[0];
+        for (let i = 1; i < items.length; i++) {
+          if (isMax ? compareValues(items[i], best) > 0 : compareValues(items[i], best) < 0) {
+            best = items[i];
+          }
+        }
+        return best;
+      }
+
       case 'map': {
         if (args.length < 2) {
           throw new TypeError('map() requires at least 2 arguments', line, column);
@@ -1217,6 +1301,78 @@ export class Interpreter {
 
     return false;
   }
+}
+
+function applyFormatSpec(value: PyValue, spec: string): string {
+  // Parse format spec: [[fill]align][sign][#][0][width][grouping][.precision][type]
+  const match = spec.match(/^([<>=^])?(\+|-| )?(#)?(0)?(\d+)?([_,])?(\.(\d+))?([bcdeEfFgGnosxX%])?$/);
+  if (!match) return pyStr(value);
+
+  const [, align, , , zero, widthStr, , , precisionStr, typeChar] = match;
+  const width = widthStr ? parseInt(widthStr) : 0;
+  const precision = precisionStr !== undefined ? parseInt(precisionStr) : undefined;
+
+  let formatted: string;
+  const num = isNumber(value) ? value.value : NaN;
+
+  switch (typeChar) {
+    case 'f':
+    case 'F':
+      formatted = (isNaN(num) ? 0 : num).toFixed(precision ?? 6);
+      break;
+    case 'd':
+      formatted = String(Math.trunc(isNaN(num) ? 0 : num));
+      break;
+    case 'b':
+      formatted = Math.trunc(isNaN(num) ? 0 : num).toString(2);
+      break;
+    case 'o':
+      formatted = Math.trunc(isNaN(num) ? 0 : num).toString(8);
+      break;
+    case 'x':
+      formatted = Math.trunc(isNaN(num) ? 0 : num).toString(16);
+      break;
+    case 'X':
+      formatted = Math.trunc(isNaN(num) ? 0 : num).toString(16).toUpperCase();
+      break;
+    case 'e':
+      formatted = (isNaN(num) ? 0 : num).toExponential(precision ?? 6);
+      break;
+    case 'E':
+      formatted = (isNaN(num) ? 0 : num).toExponential(precision ?? 6).toUpperCase();
+      break;
+    case 's':
+    case undefined:
+      if (precision !== undefined && isString(value)) {
+        formatted = value.value.slice(0, precision);
+      } else if (precision !== undefined && !isNaN(num)) {
+        formatted = num.toFixed(precision);
+      } else {
+        formatted = pyStr(value);
+      }
+      break;
+    default:
+      formatted = pyStr(value);
+  }
+
+  // Apply width and alignment
+  if (width > formatted.length) {
+    const fill = zero ? '0' : ' ';
+    const effectiveAlign = align || (zero ? '=' : (isNaN(num) ? '<' : '>'));
+    const pad = width - formatted.length;
+    switch (effectiveAlign) {
+      case '<': formatted = formatted + fill.repeat(pad); break;
+      case '>': formatted = fill.repeat(pad) + formatted; break;
+      case '^': {
+        const left = Math.floor(pad / 2);
+        formatted = fill.repeat(left) + formatted + fill.repeat(pad - left);
+        break;
+      }
+      default: formatted = fill.repeat(pad) + formatted;
+    }
+  }
+
+  return formatted;
 }
 
 function isKwargsValue(value: PyValue): value is PyKwargs {

@@ -279,7 +279,7 @@ export class Lexer {
       this.advance(); // consume third quote
     }
     
-    const parts: { text: string; expr: string | null }[] = [];
+    const parts: { text: string; expr: string | null; formatSpec?: string }[] = [];
     let currentText = '';
     let terminated = false;
     
@@ -343,8 +343,21 @@ export class Lexer {
             } else {
               this.advance(); // consume closing '}'
             }
-          } else if (ch === quote && !isTriple) {
-            throw new SyntaxError('Unterminated expression in f-string', startLine, startColumn);
+          } else if (ch === '"' || ch === "'") {
+            // String literal inside expression — consume it whole
+            const strQuote = this.advance();
+            expr += strQuote;
+            while (!this.isAtEnd() && this.peek() !== strQuote) {
+              if (this.peek() === '\\') {
+                expr += this.advance(); // backslash
+                if (!this.isAtEnd()) expr += this.advance(); // escaped char
+              } else {
+                expr += this.advance();
+              }
+            }
+            if (!this.isAtEnd()) {
+              expr += this.advance(); // closing quote
+            }
           } else {
             expr += this.advance();
           }
@@ -354,8 +367,31 @@ export class Lexer {
           throw new SyntaxError('Unterminated expression in f-string', startLine, startColumn);
         }
         
+        // Split format spec from expression (e.g. "x:.2f" → expr="x", fmt=".2f")
+        let exprStr = expr.trim();
+        let formatSpec: string | undefined;
+        let colonIdx = -1;
+        let depth = 0;
+        let inStr: string | null = null;
+        for (let ci = 0; ci < exprStr.length; ci++) {
+          const cc = exprStr[ci];
+          if (inStr) {
+            if (cc === '\\') { ci++; continue; }
+            if (cc === inStr) inStr = null;
+            continue;
+          }
+          if (cc === '"' || cc === "'") { inStr = cc; continue; }
+          if (cc === '(' || cc === '[' || cc === '{') { depth++; continue; }
+          if (cc === ')' || cc === ']' || cc === '}') { depth--; continue; }
+          if (cc === ':' && depth === 0) { colonIdx = ci; break; }
+        }
+        if (colonIdx >= 0) {
+          formatSpec = exprStr.slice(colonIdx + 1);
+          exprStr = exprStr.slice(0, colonIdx).trim();
+        }
+
         // Add expression part
-        parts.push({ text: '', expr: expr.trim() });
+        parts.push({ text: '', expr: exprStr, formatSpec });
         continue;
       }
       

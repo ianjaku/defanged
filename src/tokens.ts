@@ -91,7 +91,7 @@ export interface Token {
   line: number;
   column: number;
   // For f-strings: array of string parts and expression strings
-  fstringParts?: { text: string; expr: string | null }[];
+  fstringParts?: Array<{ text: string; expr: string | null; formatSpec?: string }>;
 }
 
 export const KEYWORDS: Record<string, TokenType> = {

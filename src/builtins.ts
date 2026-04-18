@@ -212,10 +212,13 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
       }
 
       for (const item of items) {
-        if (!isNumber(item)) {
+        if (isNumber(item)) {
+          total += item.value;
+        } else if (item.type === 'boolean') {
+          total += item.value ? 1 : 0;
+        } else {
           throw new TypeError(`unsupported operand type for sum: '${item.type}'`, 0, 0);
         }
-        total += item.value;
       }
       
       return pyNumber(total);
@@ -468,188 +471,26 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
     },
   });
 
-  // min(...args, key=None) - Return minimum value
   builtins.set('min', {
     type: 'builtin',
     name: 'min',
-    acceptsKwargs: true,
-    fn: (...rawArgs: (PyValue | PyKwargs)[]): PyValue => {
-      const { args, kwargs } = extractKwargs(rawArgs);
-      const keyFunc = kwargs.key;
-      
-      if (args.length === 0) {
-        throw new TypeError('min expected 1 argument, got 0', 0, 0);
-      }
-      
-      let items: PyValue[];
-      if (args.length === 1 && isIterable(args[0])) {
-        if (isList(args[0]) || isTuple(args[0])) {
-          items = args[0].elements;
-        } else if (args[0].type === 'iterator') {
-          items = args[0].values;
-        } else if (isDict(args[0])) {
-          items = Array.from(args[0].entries.keys()).map(k => 
-            typeof k === 'string' ? pyString(k) : 
-            typeof k === 'number' ? pyNumber(k) : 
-            pyBoolean(k as boolean)
-          );
-        } else {
-          throw new TypeError(`'${args[0].type}' object is not iterable`, 0, 0);
-        }
-      } else {
-        items = args;
-      }
-      
-      if (items.length === 0) {
-        throw new TypeError('min() arg is an empty sequence', 0, 0);
-      }
-      
-      // If key function provided, use it to compare
-      if (keyFunc && keyFunc.type === 'function') {
-        let minItem = items[0];
-        let minKey = applyKeyFunction(keyFunc, minItem);
-        
-        for (let i = 1; i < items.length; i++) {
-          const itemKey = applyKeyFunction(keyFunc, items[i]);
-          if (compareValues(itemKey, minKey) < 0) {
-            minItem = items[i];
-            minKey = itemKey;
-          }
-        }
-        return minItem;
-      }
-      
-      // Default comparison
-      let minVal = items[0];
-      for (let i = 1; i < items.length; i++) {
-        if (compareValues(items[i], minVal) < 0) {
-          minVal = items[i];
-        }
-      }
-      
-      return minVal;
-    },
-  });
+    requiresInterpreter: true,
+    fn: (): PyValue => { throw new TypeError('min() should be handled by interpreter', 0, 0); },
+  } as any);
 
-  // max(...args, key=None) - Return maximum value
   builtins.set('max', {
     type: 'builtin',
     name: 'max',
-    acceptsKwargs: true,
-    fn: (...rawArgs: (PyValue | PyKwargs)[]): PyValue => {
-      const { args, kwargs } = extractKwargs(rawArgs);
-      const keyFunc = kwargs.key;
-      
-      if (args.length === 0) {
-        throw new TypeError('max expected 1 argument, got 0', 0, 0);
-      }
-      
-      let items: PyValue[];
-      if (args.length === 1 && isIterable(args[0])) {
-        if (isList(args[0]) || isTuple(args[0])) {
-          items = args[0].elements;
-        } else if (args[0].type === 'iterator') {
-          items = args[0].values;
-        } else if (isDict(args[0])) {
-          items = Array.from(args[0].entries.keys()).map(k => 
-            typeof k === 'string' ? pyString(k) : 
-            typeof k === 'number' ? pyNumber(k) : 
-            pyBoolean(k as boolean)
-          );
-        } else {
-          throw new TypeError(`'${args[0].type}' object is not iterable`, 0, 0);
-        }
-      } else {
-        items = args;
-      }
-      
-      if (items.length === 0) {
-        throw new TypeError('max() arg is an empty sequence', 0, 0);
-      }
-      
-      // If key function provided, use it to compare
-      if (keyFunc && keyFunc.type === 'function') {
-        let maxItem = items[0];
-        let maxKey = applyKeyFunction(keyFunc, maxItem);
-        
-        for (let i = 1; i < items.length; i++) {
-          const itemKey = applyKeyFunction(keyFunc, items[i]);
-          if (compareValues(itemKey, maxKey) > 0) {
-            maxItem = items[i];
-            maxKey = itemKey;
-          }
-        }
-        return maxItem;
-      }
-      
-      // Default comparison
-      let maxVal = items[0];
-      for (let i = 1; i < items.length; i++) {
-        if (compareValues(items[i], maxVal) > 0) {
-          maxVal = items[i];
-        }
-      }
-      
-      return maxVal;
-    },
-  });
+    requiresInterpreter: true,
+    fn: (): PyValue => { throw new TypeError('max() should be handled by interpreter', 0, 0); },
+  } as any);
 
-  // sorted(iterable, key=None, reverse=False) - Return sorted list
   builtins.set('sorted', {
     type: 'builtin',
     name: 'sorted',
-    acceptsKwargs: true,
-    fn: (...rawArgs: (PyValue | PyKwargs)[]): PyValue => {
-      const { args, kwargs } = extractKwargs(rawArgs);
-      const keyFunc = kwargs.key;
-      const reverseArg = kwargs.reverse;
-      
-      if (args.length === 0) {
-        throw new TypeError('sorted expected 1 argument, got 0', 0, 0);
-      }
-      
-      const iterable = args[0];
-      let items: PyValue[];
-      
-      if (isList(iterable) || isTuple(iterable)) {
-        items = [...iterable.elements];
-      } else if (iterable.type === 'iterator') {
-        items = [...iterable.values];
-      } else if (isString(iterable)) {
-        items = iterable.value.split('').map(c => pyString(c));
-      } else if (isDict(iterable)) {
-        items = Array.from(iterable.entries.keys()).map(k =>
-          typeof k === 'string' ? pyString(k) :
-          typeof k === 'number' ? pyNumber(k) :
-          pyBoolean(k as boolean)
-        );
-      } else {
-        throw new TypeError(`'${iterable.type}' object is not iterable`, 0, 0);
-      }
-      
-      const reverse = reverseArg?.type === 'boolean' && reverseArg.value;
-      
-      // If key function provided, use it for comparison
-      if (keyFunc && keyFunc.type === 'function') {
-        // Pre-compute keys for stable sort
-        const itemsWithKeys = items.map(item => ({
-          item,
-          key: applyKeyFunction(keyFunc, item),
-        }));
-        
-        itemsWithKeys.sort((a, b) => compareValues(a.key, b.key));
-        items = itemsWithKeys.map(x => x.item);
-      } else {
-        items.sort((a, b) => compareValues(a, b));
-      }
-      
-      if (reverse) {
-        items.reverse();
-      }
-      
-      return pyList(items);
-    },
-  });
+    requiresInterpreter: true,
+    fn: (): PyValue => { throw new TypeError('sorted() should be handled by interpreter', 0, 0); },
+  } as any);
 
   // reversed(seq) - Return reversed iterator
   builtins.set('reversed', {

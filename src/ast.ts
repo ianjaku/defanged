@@ -151,6 +151,7 @@ export interface Lambda extends ASTNode {
 export interface FStringPart {
   text: string;
   expr: Expression | null;
+  formatSpec?: string;
 }
 
 export interface FString extends ASTNode {

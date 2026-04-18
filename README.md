@@ -97,11 +97,9 @@ const b = await interpreter.run(codeTwo);
 
 A quick overview — see [`FEATURES.md`](./FEATURES.md) for the authoritative list with TypeScript analogues for every feature.
 
-**Works:** numbers, strings, f-strings, booleans, `None`, lists, tuples, dicts, sets, comprehensions (list, dict), `if`/`elif`/`else`, `for`/`while` (with `else` clauses), `break`/`continue`/`pass`, `try`/`except`/`finally`, `raise`, function definitions with `*args`/`**kwargs` and defaults, closures, lambdas, chained assignment (`x = y = 5`), chained comparisons (`0 < x < 10`), slicing, `and`/`or`/`not`, ternary expressions, walrus (`:=`), most string/list/dict methods, and ~30 built-ins (`len`, `range`, `sum`, `sorted`, `enumerate`, `zip`, `map`, `filter`, `any`, `all`, `print`, etc.).
+**Works:** numbers, strings, f-strings (including format specs and nested quotes), booleans (with int arithmetic), `None`, lists, tuples, dicts, sets, comprehensions (list, dict, set), `if`/`elif`/`else`, `for`/`while` (with `else` clauses), `break`/`continue`/`pass`, `try`/`except`/`finally`, `raise`, function definitions with `*args`/`**kwargs` and defaults, closures, lambdas (including as keyword arguments), chained assignment (`x = y = 5`), tuple unpacking, chained comparisons (`0 < x < 10`), slicing, `and`/`or`/`not`, ternary expressions, walrus (`:=`), string/list/dict/set methods, and ~30 built-ins (`len`, `range`, `sum`, `sorted`, `enumerate`, `zip`, `map`, `filter`, `any`, `all`, `print`, etc.).
 
 **Intentionally absent (for safety):** `import`, `open`, `exec`, `eval`, `__import__`, `globals`, `locals`, `compile`, filesystem I/O, network, subprocess, classes, decorators, generators, `async`/`await`.
-
-**Known gaps (will be fixed):** tuple unpacking at statement level, `lstrip`/`rstrip`/`ljust`/`rjust`, set-literal comprehensions, f-string format specs, and a handful of built-ins. See `FEATURES.md`.
 
 ---
 

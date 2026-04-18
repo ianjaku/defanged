@@ -955,7 +955,7 @@ export class Parser {
           const exprTokens = tokenize(part.expr);
           const exprParser = new Parser(exprTokens);
           const exprAst = exprParser.expression();
-          return { text: part.text, expr: exprAst };
+          return { text: part.text, expr: exprAst, formatSpec: part.formatSpec };
         } else {
           return { text: part.text, expr: null };
         }
