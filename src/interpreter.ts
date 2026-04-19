@@ -223,7 +223,7 @@ export class Interpreter {
       }
 
       case 'FunctionDef': {
-        const func: PyValue = {
+        let func: PyValue = {
           type: 'function',
           name: stmt.name,
           params: stmt.params,
@@ -232,6 +232,10 @@ export class Interpreter {
           body: stmt.body,
           closure: env,
         };
+        for (let i = stmt.decorators.length - 1; i >= 0; i--) {
+          const deco = await this.evaluate(stmt.decorators[i], env);
+          func = await this.call(deco, [func], {}, stmt.line, stmt.column);
+        }
         env.set(stmt.name, func);
         return pyNone();
       }

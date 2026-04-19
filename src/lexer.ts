@@ -556,6 +556,9 @@ export class Lexer {
       case '~':
         type = TokenType.TILDE;
         break;
+      case '@':
+        type = TokenType.AT;
+        break;
       case '(':
         type = TokenType.LPAREN;
         this.parenDepth++;

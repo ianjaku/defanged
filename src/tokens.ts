@@ -88,6 +88,7 @@ export enum TokenType {
   COMMA = 'COMMA',         // ,
   COLON = 'COLON',         // :
   DOT = 'DOT',             // .
+  AT = 'AT',               // @
 
   // Whitespace (Python-specific)
   NEWLINE = 'NEWLINE',

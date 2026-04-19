@@ -70,7 +70,8 @@ export class Parser {
     if (this.check(TokenType.IF)) return this.ifStatement();
     if (this.check(TokenType.FOR)) return this.forStatement();
     if (this.check(TokenType.WHILE)) return this.whileStatement();
-    if (this.check(TokenType.DEF)) return this.functionDef();
+    if (this.check(TokenType.AT)) return this.decoratedDef();
+    if (this.check(TokenType.DEF)) return this.functionDef([]);
     if (this.check(TokenType.RETURN)) return this.returnStatement();
     if (this.check(TokenType.BREAK)) return this.breakStatement();
     if (this.check(TokenType.CONTINUE)) return this.continueStatement();
@@ -284,7 +285,16 @@ export class Parser {
     };
   }
 
-  private functionDef(): Statement {
+  private decoratedDef(): Statement {
+    const decorators: Expression[] = [];
+    while (this.match(TokenType.AT)) {
+      decorators.push(this.expression());
+      this.consumeNewline();
+    }
+    return this.functionDef(decorators);
+  }
+
+  private functionDef(decorators: Expression[]): Statement {
     const token = this.consume(TokenType.DEF, "Expected 'def'");
     const nameToken = this.consume(TokenType.IDENTIFIER, "Expected function name");
     const name = nameToken.value as string;
@@ -301,6 +311,7 @@ export class Parser {
       params,
       restParam,
       kwargsParam,
+      decorators,
       body,
       line: token.line,
       column: token.column,

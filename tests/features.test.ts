@@ -1918,3 +1918,43 @@ describe('% string formatting', () => {
     expect(await runPython('"%o" % 8')).toBe("10");
   });
 });
+
+// ─── Decorators ─────────────────────────────────────────────────────────────
+
+describe('decorators', () => {
+  test('simple decorator', async () => {
+    expect(await runPython(`
+def double(fn):
+    def wrapper(x):
+        return fn(x) * 2
+    return wrapper
+
+@double
+def add_one(x):
+    return x + 1
+
+add_one(5)
+`)).toBe(12);
+  });
+
+  test('stacked decorators', async () => {
+    expect(await runPython(`
+def add_prefix(fn):
+    def wrapper():
+        return "prefix_" + fn()
+    return wrapper
+
+def add_suffix(fn):
+    def wrapper():
+        return fn() + "_suffix"
+    return wrapper
+
+@add_prefix
+@add_suffix
+def greet():
+    return "hello"
+
+greet()
+`)).toBe("prefix_hello_suffix");
+  });
+});

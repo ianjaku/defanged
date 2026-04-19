@@ -239,6 +239,7 @@ export interface FunctionDef extends ASTNode {
   params: Parameter[];
   restParam?: string;
   kwargsParam?: string;
+  decorators: Expression[];
   body: Statement[];
 }
 
