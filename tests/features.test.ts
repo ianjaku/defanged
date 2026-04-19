@@ -1665,3 +1665,104 @@ describe('Bitwise operators', () => {
     expect(await runPython('1 << 4 | 1')).toBe(17);
   });
 });
+
+// ─── Additional builtins ────────────────────────────────────────────────────
+
+describe('pow / divmod / callable builtins', () => {
+  test('pow(2, 10)', async () => {
+    expect(await runPython('pow(2, 10)')).toBe(1024);
+  });
+
+  test('pow with modulo', async () => {
+    expect(await runPython('pow(2, 10, 100)')).toBe(24);
+  });
+
+  test('divmod(17, 5)', async () => {
+    expect(await runPython('divmod(17, 5)')).toEqual([3, 2]);
+  });
+
+  test('callable on function', async () => {
+    expect(await runPython('def f():\n    pass\ncallable(f)')).toBe(true);
+  });
+
+  test('callable on non-function', async () => {
+    expect(await runPython('callable(42)')).toBe(false);
+  });
+});
+
+describe('tuple() constructor', () => {
+  test('tuple from list', async () => {
+    expect(await runPython('list(tuple([1, 2, 3]))')).toEqual([1, 2, 3]);
+  });
+
+  test('tuple from string', async () => {
+    expect(await runPython('list(tuple("abc"))')).toEqual(["a", "b", "c"]);
+  });
+
+  test('empty tuple()', async () => {
+    expect(await runPython('len(tuple())')).toBe(0);
+  });
+});
+
+describe('int() with base', () => {
+  test('int("ff", 16)', async () => {
+    expect(await runPython('int("ff", 16)')).toBe(255);
+  });
+
+  test('int("1010", 2)', async () => {
+    expect(await runPython('int("1010", 2)')).toBe(10);
+  });
+
+  test('int("0xff", 16)', async () => {
+    expect(await runPython('int("0xff", 16)')).toBe(255);
+  });
+});
+
+describe('dict() keyword constructor', () => {
+  test('dict(a=1, b=2)', async () => {
+    const result = await runPython('d = dict(a=1, b=2)\nd["a"]');
+    expect(result).toBe(1);
+  });
+
+  test('empty dict()', async () => {
+    expect(await runPython('len(dict())')).toBe(0);
+  });
+});
+
+describe('print sep/end', () => {
+  test('print with sep', async () => {
+    const output: string[] = [];
+    const interp = createInterpreter({ onPrint: (s) => output.push(s) });
+    await interp.run('print("a", "b", sep=",")');
+    expect(output[0]).toBe('a,b');
+  });
+
+  test('print with end', async () => {
+    const output: string[] = [];
+    const interp = createInterpreter({ onPrint: (s) => output.push(s) });
+    await interp.run('print("hello", end="!")');
+    expect(output[0]).toBe('hello!');
+  });
+});
+
+describe('enumerate(start=N) keyword form', () => {
+  test('enumerate with start keyword', async () => {
+    expect(await runPython('list(enumerate(["a","b"], start=5))')).toEqual([[5,"a"],[6,"b"]]);
+  });
+});
+
+describe('isinstance with type builtins', () => {
+  test('isinstance(5, int)', async () => {
+    expect(await runPython('isinstance(5, int)')).toBe(true);
+  });
+
+  test('isinstance("hi", str)', async () => {
+    expect(await runPython('isinstance("hi", str)')).toBe(true);
+  });
+
+  test('isinstance with tuple of types', async () => {
+    expect(await runPython('isinstance(5, (int, str))')).toBe(true);
+    expect(await runPython('isinstance("hi", (int, str))')).toBe(true);
+    expect(await runPython('isinstance([], (int, str))')).toBe(false);
+  });
+});

@@ -13,6 +13,7 @@ import {
   pyList,
   pyDict,
   pySet,
+  pyTuple,
   pyIterator,
   isNumber,
   isString,
@@ -307,34 +308,75 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
     },
   });
 
-  // dict(iterable) - Convert to dict
+  // tuple(iterable) - Convert to tuple
+  builtins.set('tuple', {
+    type: 'builtin',
+    name: 'tuple',
+    fn: (iterable?: PyValue): PyValue => {
+      if (iterable === undefined) return pyTuple([]);
+      if (isTuple(iterable)) return pyTuple([...iterable.elements]);
+      if (isList(iterable)) return pyTuple([...iterable.elements]);
+      if (isString(iterable)) {
+        return pyTuple(iterable.value.split('').map(c => pyString(c)));
+      }
+      if (iterable.type === 'iterator') {
+        return pyTuple([...iterable.values]);
+      }
+      if (isDict(iterable)) {
+        return pyTuple(Array.from(iterable.entries.keys()).map(k =>
+          typeof k === 'string' ? pyString(k) :
+          typeof k === 'number' ? pyNumber(k) :
+          pyBoolean(k as boolean)
+        ));
+      }
+      if (isSet(iterable)) {
+        return pyTuple(Array.from(iterable.values).map(v =>
+          typeof v === 'string' ? pyString(v) :
+          typeof v === 'number' ? pyNumber(v) :
+          pyBoolean(v as boolean)
+        ));
+      }
+      throw new TypeError(`'${iterable.type}' object is not iterable`, 0, 0);
+    },
+  });
+
+  // dict(iterable) or dict(key=val, ...) - Convert to dict
   builtins.set('dict', {
     type: 'builtin',
     name: 'dict',
-    fn: (iterable?: PyValue): PyValue => {
-      if (iterable === undefined) return pyDict();
-      if (isDict(iterable)) return pyDict(new Map(iterable.entries));
-      
-      // From list of pairs
-      if (isList(iterable) || isTuple(iterable)) {
-        const entries = new Map<string | number | boolean, PyValue>();
-        for (const item of iterable.elements) {
-          if (!isList(item) && !isTuple(item)) {
-            throw new TypeError('dictionary update sequence element is not iterable', 0, 0);
+    acceptsKwargs: true,
+    fn: (...rawArgs: (PyValue | PyKwargs)[]): PyValue => {
+      const { args, kwargs } = extractKwargs(rawArgs);
+      const entries = new Map<string | number | boolean, PyValue>();
+      const iterable = args[0];
+
+      if (iterable !== undefined) {
+        if (isDict(iterable)) {
+          for (const [k, v] of iterable.entries) entries.set(k, v);
+        } else if (isList(iterable) || isTuple(iterable)) {
+          for (const item of iterable.elements) {
+            if (!isList(item) && !isTuple(item)) {
+              throw new TypeError('dictionary update sequence element is not iterable', 0, 0);
+            }
+            if (item.elements.length !== 2) {
+              throw new TypeError(`dictionary update sequence element has length ${item.elements.length}; 2 is required`, 0, 0);
+            }
+            const [key, value] = item.elements;
+            if (!isString(key) && !isNumber(key)) {
+              throw new TypeError('unhashable type for dict key', 0, 0);
+            }
+            entries.set(key.value, value);
           }
-          if (item.elements.length !== 2) {
-            throw new TypeError(`dictionary update sequence element has length ${item.elements.length}; 2 is required`, 0, 0);
-          }
-          const [key, value] = item.elements;
-          if (!isString(key) && !isNumber(key)) {
-            throw new TypeError('unhashable type for dict key', 0, 0);
-          }
-          entries.set(key.value, value);
+        } else {
+          throw new TypeError(`'${iterable.type}' object is not iterable`, 0, 0);
         }
-        return pyDict(entries);
       }
-      
-      throw new TypeError(`'${iterable.type}' object is not iterable`, 0, 0);
+
+      for (const [k, v] of Object.entries(kwargs)) {
+        entries.set(k, v);
+      }
+
+      return pyDict(entries);
     },
   });
 
@@ -397,12 +439,24 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
     },
   });
 
-  // int(obj) - Convert to integer
+  // int(obj, base=10) - Convert to integer
   builtins.set('int', {
     type: 'builtin',
     name: 'int',
-    fn: (obj?: PyValue): PyValue => {
+    fn: (obj?: PyValue, base?: PyValue): PyValue => {
       if (obj === undefined) return pyNumber(0);
+      if (base !== undefined) {
+        if (!isNumber(base)) throw new TypeError("int() base must be an integer", 0, 0);
+        if (!isString(obj)) throw new TypeError("int() can't convert non-string with explicit base", 0, 0);
+        const b = Math.trunc(base.value);
+        let trimmed = obj.value.trim().toLowerCase();
+        if (b === 16 && trimmed.startsWith('0x')) trimmed = trimmed.slice(2);
+        if (b === 8 && trimmed.startsWith('0o')) trimmed = trimmed.slice(2);
+        if (b === 2 && trimmed.startsWith('0b')) trimmed = trimmed.slice(2);
+        const result = parseInt(trimmed, b);
+        if (isNaN(result)) throw new ValueError(`invalid literal for int() with base ${b}: '${obj.value}'`, 0, 0);
+        return pyNumber(result);
+      }
       if (isNumber(obj)) return pyNumber(Math.trunc(obj.value));
       if (isString(obj)) {
         const trimmed = obj.value.trim();
@@ -511,9 +565,13 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
   builtins.set('enumerate', {
     type: 'builtin',
     name: 'enumerate',
-    fn: (iterable: PyValue, start?: PyValue): PyValue => {
+    acceptsKwargs: true,
+    fn: (...rawArgs: (PyValue | PyKwargs)[]): PyValue => {
+      const { args, kwargs } = extractKwargs(rawArgs);
+      const iterable = args[0];
+      if (!iterable) throw new TypeError('enumerate expected at least 1 argument, got 0', 0, 0);
       let items: PyValue[];
-      
+
       if (isList(iterable) || isTuple(iterable)) {
         items = iterable.elements;
       } else if (iterable.type === 'iterator') {
@@ -523,12 +581,12 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
       } else {
         throw new TypeError(`'${iterable.type}' object is not iterable`, 0, 0);
       }
-      
-      const startIdx = start && isNumber(start) ? start.value : 0;
-      const result = items.map((item, i) => 
-        pyList([pyNumber(i + startIdx), item])
+
+      const startVal = kwargs.start && isNumber(kwargs.start) ? kwargs.start.value : (args[1] && isNumber(args[1]) ? args[1].value : 0);
+      const result = items.map((item, i) =>
+        pyList([pyNumber(i + startVal), item])
       );
-      
+
       return pyIterator(result);
     },
   });
@@ -558,16 +616,20 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
     },
   });
 
-  // print(*args) - Print values to output
+  // print(*args, sep=' ', end='\n') - Print values to output
   builtins.set('print', {
     type: 'builtin',
     name: 'print',
-    fn: (...args: PyValue[]): PyValue => {
+    acceptsKwargs: true,
+    fn: (...rawArgs: (PyValue | PyKwargs)[]): PyValue => {
       if (!onPrint) {
         throw new Error('print() is not available. Use print_table(data, title, columns) for tables or show_chart(type, data, title) for charts.');
       }
-      const output = args.map(pyStr).join(' ');
-      onPrint(output);
+      const { args, kwargs } = extractKwargs(rawArgs);
+      const sep = kwargs.sep && isString(kwargs.sep) ? kwargs.sep.value : ' ';
+      const end = kwargs.end && isString(kwargs.end) ? kwargs.end.value : '\n';
+      const output = args.map(pyStr).join(sep);
+      onPrint(output + (end !== '\n' ? end : ''));
       return pyNone();
     },
   });
@@ -627,6 +689,45 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
     },
   });
 
+  // pow(base, exp[, mod]) - Power with optional modulo
+  builtins.set('pow', {
+    type: 'builtin',
+    name: 'pow',
+    fn: (base: PyValue, exp: PyValue, mod?: PyValue): PyValue => {
+      if (!isNumber(base) || !isNumber(exp)) throw new TypeError('pow() arguments must be numbers', 0, 0);
+      if (mod !== undefined) {
+        if (!isNumber(mod)) throw new TypeError('pow() 3rd argument must be a number', 0, 0);
+        if (mod.value === 0) throw new ValueError('pow() 3rd argument cannot be 0', 0, 0);
+        let result = BigInt(Math.trunc(base.value)) ** BigInt(Math.trunc(exp.value));
+        result = ((result % BigInt(Math.trunc(mod.value))) + BigInt(Math.trunc(mod.value))) % BigInt(Math.trunc(mod.value));
+        return pyNumber(Number(result));
+      }
+      return pyNumber(Math.pow(base.value, exp.value));
+    },
+  });
+
+  // divmod(a, b) - Return (quotient, remainder)
+  builtins.set('divmod', {
+    type: 'builtin',
+    name: 'divmod',
+    fn: (a: PyValue, b: PyValue): PyValue => {
+      if (!isNumber(a) || !isNumber(b)) throw new TypeError('divmod() arguments must be numbers', 0, 0);
+      if (b.value === 0) throw new ValueError('integer division or modulo by zero', 0, 0);
+      const q = Math.floor(a.value / b.value);
+      const r = ((a.value % b.value) + b.value) % b.value;
+      return pyList([pyNumber(q), pyNumber(r)]);
+    },
+  });
+
+  // callable(obj) - Return True if the object appears callable
+  builtins.set('callable', {
+    type: 'builtin',
+    name: 'callable',
+    fn: (obj: PyValue): PyValue => {
+      return pyBoolean(obj.type === 'function' || obj.type === 'builtin');
+    },
+  });
+
   // repr(obj) - Return string representation
   builtins.set('repr', {
     type: 'builtin',
@@ -658,15 +759,11 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
     },
   });
 
-  // isinstance - simplified version
+  // isinstance - checks type or tuple of types
   builtins.set('isinstance', {
     type: 'builtin',
     name: 'isinstance',
     fn: (obj: PyValue, typeArg: PyValue): PyValue => {
-      if (!isString(typeArg)) {
-        throw new TypeError('isinstance() arg 2 must be a type string', 0, 0);
-      }
-      const typeName = typeArg.value;
       const typeMap: Record<string, string[]> = {
         'int': ['number'],
         'float': ['number'],
@@ -677,8 +774,26 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
         'set': ['set'],
         'tuple': ['tuple'],
       };
-      const matches = typeMap[typeName] || [typeName];
-      return pyBoolean(matches.includes(obj.type));
+
+      const checkType = (typeName: string): boolean => {
+        const matches = typeMap[typeName] || [typeName];
+        return matches.includes(obj.type);
+      };
+
+      if (isString(typeArg)) {
+        return pyBoolean(checkType(typeArg.value));
+      }
+      if (typeArg.type === 'builtin') {
+        return pyBoolean(checkType(typeArg.name));
+      }
+      if (isTuple(typeArg)) {
+        for (const el of typeArg.elements) {
+          const name = isString(el) ? el.value : el.type === 'builtin' ? el.name : '';
+          if (checkType(name)) return pyBoolean(true);
+        }
+        return pyBoolean(false);
+      }
+      throw new TypeError('isinstance() arg 2 must be a type or tuple of types', 0, 0);
     },
   });
 
