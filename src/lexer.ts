@@ -54,6 +54,15 @@ export class Lexer {
 
     if (this.isAtEnd()) return;
 
+    // Backslash line continuation
+    if (this.peek() === '\\' && this.peekNext() === '\n') {
+      this.advance(); // consume backslash
+      this.advance(); // consume newline
+      this.line++;
+      this.column = 1;
+      return;
+    }
+
     const char = this.peek();
 
     // Comments
@@ -289,12 +298,18 @@ export class Lexer {
       throw new SyntaxError('Unterminated string literal', startLine, startColumn);
     }
 
-    this.tokens.push({
-      type: TokenType.STRING,
-      value,
-      line: startLine,
-      column: startColumn,
-    });
+    // Implicit string concatenation: merge with previous string token
+    const prev = this.tokens[this.tokens.length - 1];
+    if (prev && prev.type === TokenType.STRING) {
+      prev.value = (prev.value as string) + value;
+    } else {
+      this.tokens.push({
+        type: TokenType.STRING,
+        value,
+        line: startLine,
+        column: startColumn,
+      });
+    }
   }
 
   private fstring(): void {

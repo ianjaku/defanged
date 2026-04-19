@@ -2017,11 +2017,33 @@ describe('starred assignment', () => {
     expect(await runPython('*a, b = [1, 2, 3]\na')).toEqual([1, 2]);
   });
 
+  test('empty star collects empty list', async () => {
+    expect(await runPython('a, *b = [1]\nb')).toEqual([]);
+  });
+
   test('a, *b, c = [1, 2, 3, 4, 5]', async () => {
     const interp = createInterpreter({ onPrint: () => {} });
     await interp.run('a, *b, c = [1, 2, 3, 4, 5]');
     expect(await interp.run('a')).toBe(1);
     expect(await interp.run('b')).toEqual([2, 3, 4]);
     expect(await interp.run('c')).toBe(5);
+  });
+});
+
+// ─── Backslash line continuation & implicit string concat ───────────────────
+
+describe('backslash line continuation', () => {
+  test('backslash continues expression', async () => {
+    expect(await runPython('x = 1 + \\\n2\nx')).toBe(3);
+  });
+});
+
+describe('implicit string concatenation', () => {
+  test('adjacent strings are concatenated', async () => {
+    expect(await runPython('"hello " "world"')).toBe("hello world");
+  });
+
+  test('mixed quotes', async () => {
+    expect(await runPython("'hello ' \"world\"")).toBe("hello world");
   });
 });
