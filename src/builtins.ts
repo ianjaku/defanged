@@ -53,27 +53,37 @@ export function compareValues(a: PyValue, b: PyValue): number {
   if (isString(a) && isString(b)) {
     return a.value.localeCompare(b.value);
   }
+  if ((isTuple(a) || isList(a)) && (isTuple(b) || isList(b))) {
+    const minLen = Math.min(a.elements.length, b.elements.length);
+    for (let i = 0; i < minLen; i++) {
+      const cmp = compareValues(a.elements[i], b.elements[i]);
+      if (cmp !== 0) return cmp;
+    }
+    return a.elements.length - b.elements.length;
+  }
   throw new TypeError(`'<' not supported between '${a.type}' and '${b.type}'`, 0, 0);
 }
 
 /**
  * Apply a key function to a value (synchronous only for sorting).
- * This is a simplified version that only supports simple lambda-like functions.
+ * Supports simple lambda-like functions and builtin functions.
  */
 export function applyKeyFunction(func: PyValue, item: PyValue): PyValue {
+  if (func.type === 'builtin') {
+    return func.fn(item);
+  }
+
   if (func.type !== 'function') {
     throw new TypeError('key must be a function', 0, 0);
   }
-  
-  // Simple single-expression function body evaluation
-  // For lambda x: x['field'], the body is just [Return(Subscript(...))]
+
   if (func.body.length === 1 && func.body[0].type === 'Return') {
     const returnStmt = func.body[0];
     if (returnStmt.value) {
       return evaluateKeyExpression(returnStmt.value, func.params[0]?.name || 'x', item);
     }
   }
-  
+
   throw new TypeError('key function must be a simple lambda expression', 0, 0);
 }
 
@@ -81,13 +91,30 @@ export function applyKeyFunction(func: PyValue, item: PyValue): PyValue {
  * Evaluate a simple expression for key function (synchronous).
  * Supports: subscript access, attribute access, simple identifiers
  */
+let _builtinsRef: Map<string, PyBuiltin> | null = null;
+export function setBuiltinsRef(builtins: Map<string, PyBuiltin>): void {
+  _builtinsRef = builtins;
+}
+
 function evaluateKeyExpression(expr: any, paramName: string, paramValue: PyValue): PyValue {
   switch (expr.type) {
     case 'Identifier':
       if (expr.name === paramName) {
         return paramValue;
       }
+      if (_builtinsRef?.has(expr.name)) {
+        return _builtinsRef.get(expr.name)!;
+      }
       throw new TypeError(`Unknown variable in key function: ${expr.name}`, 0, 0);
+
+    case 'Call': {
+      const func = evaluateKeyExpression(expr.func, paramName, paramValue);
+      if (func.type === 'builtin') {
+        const args = expr.args.map((a: any) => evaluateKeyExpression(a, paramName, paramValue));
+        return func.fn(...args);
+      }
+      throw new TypeError('key function calls must use builtin functions', 0, 0);
+    }
     
     case 'Subscript': {
       const obj = evaluateKeyExpression(expr.object, paramName, paramValue);
@@ -1024,5 +1051,6 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
     });
   }
 
+  setBuiltinsRef(builtins);
   return builtins;
 }

@@ -404,7 +404,7 @@ export function getListMethod(obj: PyValue & { type: 'list' }, attr: string, lin
         const keyFunc = kwargs.key;
         const reverse = kwargs.reverse?.type === 'boolean' && (kwargs.reverse as any).value;
 
-        if (keyFunc && keyFunc.type === 'function') {
+        if (keyFunc && (keyFunc.type === 'function' || keyFunc.type === 'builtin')) {
           const itemsWithKeys = list.map(item => ({
             item,
             key: applyKeyFunction(keyFunc, item),

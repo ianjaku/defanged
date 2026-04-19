@@ -1815,3 +1815,23 @@ finally:
     expect(await interp.run('result')).toEqual(["try", "else", "finally"]);
   });
 });
+
+// ─── sorted() and list.sort() improvements ──────────────────────────────────
+
+describe('sorting improvements', () => {
+  test('sorted() compares tuples', async () => {
+    expect(await runPython('sorted([(3, "c"), (1, "a"), (2, "b")])')).toEqual([[1,"a"],[2,"b"],[3,"c"]]);
+  });
+
+  test('sorted() compares lists', async () => {
+    expect(await runPython('sorted([[3, 1], [1, 2], [1, 0]])')).toEqual([[1,0],[1,2],[3,1]]);
+  });
+
+  test('list.sort(key=len)', async () => {
+    expect(await runPython('x = ["banana", "pie", "a"]\nx.sort(key=len)\nx')).toEqual(["a", "pie", "banana"]);
+  });
+
+  test('list.sort(key=lambda with len call)', async () => {
+    expect(await runPython('x = ["banana", "pie", "a"]\nx.sort(key=lambda s: len(s))\nx')).toEqual(["a", "pie", "banana"]);
+  });
+});
