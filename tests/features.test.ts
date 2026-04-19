@@ -1632,3 +1632,36 @@ describe('assert statement', () => {
     expect(await runPython('x = 5\nassert x > 3\nx')).toBe(5);
   });
 });
+
+// ─── Bitwise operators ──────────────────────────────────────────────────────
+
+describe('Bitwise operators', () => {
+  test('AND &', async () => {
+    expect(await runPython('0b1100 & 0b1010')).toBe(0b1000);
+  });
+
+  test('OR |', async () => {
+    expect(await runPython('0b1100 | 0b1010')).toBe(0b1110);
+  });
+
+  test('XOR ^', async () => {
+    expect(await runPython('0b1100 ^ 0b1010')).toBe(0b0110);
+  });
+
+  test('NOT ~', async () => {
+    expect(await runPython('~0')).toBe(-1);
+    expect(await runPython('~5')).toBe(-6);
+  });
+
+  test('left shift <<', async () => {
+    expect(await runPython('1 << 4')).toBe(16);
+  });
+
+  test('right shift >>', async () => {
+    expect(await runPython('16 >> 2')).toBe(4);
+  });
+
+  test('precedence: shifts bind tighter than bitwise and/or', async () => {
+    expect(await runPython('1 << 4 | 1')).toBe(17);
+  });
+});

@@ -36,14 +36,14 @@ export interface Identifier extends ASTNode {
 
 export interface BinaryOp extends ASTNode {
   type: 'BinaryOp';
-  op: '+' | '-' | '*' | '/' | '//' | '%' | '**';
+  op: '+' | '-' | '*' | '/' | '//' | '%' | '**' | '&' | '|' | '^' | '<<' | '>>';
   left: Expression;
   right: Expression;
 }
 
 export interface UnaryOp extends ASTNode {
   type: 'UnaryOp';
-  op: '-' | '+' | 'not';
+  op: '-' | '+' | 'not' | '~';
   operand: Expression;
 }
 

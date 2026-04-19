@@ -535,12 +535,26 @@ export class Lexer {
         else { throw new SyntaxError(`Unexpected character '${char}'`, this.line, startColumn); }
         break;
       case '<':
-        if (next === '=') { this.advance(); type = TokenType.LE; consumed = true; }
+        if (next === '<') { this.advance(); type = TokenType.LSHIFT; consumed = true; }
+        else if (next === '=') { this.advance(); type = TokenType.LE; consumed = true; }
         else { type = TokenType.LT; }
         break;
       case '>':
-        if (next === '=') { this.advance(); type = TokenType.GE; consumed = true; }
+        if (next === '>') { this.advance(); type = TokenType.RSHIFT; consumed = true; }
+        else if (next === '=') { this.advance(); type = TokenType.GE; consumed = true; }
         else { type = TokenType.GT; }
+        break;
+      case '&':
+        type = TokenType.AMPERSAND;
+        break;
+      case '|':
+        type = TokenType.PIPE;
+        break;
+      case '^':
+        type = TokenType.CARET;
+        break;
+      case '~':
+        type = TokenType.TILDE;
         break;
       case '(':
         type = TokenType.LPAREN;

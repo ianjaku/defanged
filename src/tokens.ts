@@ -51,6 +51,14 @@ export enum TokenType {
   DOUBLE_SLASH = 'DOUBLE_SLASH',   // //
   DOUBLE_STAR = 'DOUBLE_STAR',     // **
 
+  // Bitwise
+  AMPERSAND = 'AMPERSAND',       // &
+  PIPE = 'PIPE',                 // |
+  CARET = 'CARET',               // ^
+  TILDE = 'TILDE',               // ~
+  LSHIFT = 'LSHIFT',             // <<
+  RSHIFT = 'RSHIFT',             // >>
+
   // Comparison
   EQ = 'EQ',               // ==
   NE = 'NE',               // !=

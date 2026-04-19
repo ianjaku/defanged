@@ -902,7 +902,7 @@ export class Parser {
   }
 
   private comparison(): Expression {
-    const left = this.addExpr();
+    const left = this.bitwiseOr();
 
     const ops: ('==' | '!=' | '<' | '>' | '<=' | '>=' | 'in' | 'not in' | 'is' | 'is not')[] = [];
     const comparators: Expression[] = [];
@@ -949,6 +949,43 @@ export class Parser {
       line: left.line,
       column: left.column,
     };
+  }
+
+  private bitwiseOr(): Expression {
+    let left = this.bitwiseXor();
+    while (this.match(TokenType.PIPE)) {
+      const right = this.bitwiseXor();
+      left = { type: 'BinaryOp', op: '|', left, right, line: left.line, column: left.column };
+    }
+    return left;
+  }
+
+  private bitwiseXor(): Expression {
+    let left = this.bitwiseAnd();
+    while (this.match(TokenType.CARET)) {
+      const right = this.bitwiseAnd();
+      left = { type: 'BinaryOp', op: '^', left, right, line: left.line, column: left.column };
+    }
+    return left;
+  }
+
+  private bitwiseAnd(): Expression {
+    let left = this.shiftExpr();
+    while (this.match(TokenType.AMPERSAND)) {
+      const right = this.shiftExpr();
+      left = { type: 'BinaryOp', op: '&', left, right, line: left.line, column: left.column };
+    }
+    return left;
+  }
+
+  private shiftExpr(): Expression {
+    let left = this.addExpr();
+    while (this.check(TokenType.LSHIFT) || this.check(TokenType.RSHIFT)) {
+      const op = this.advance().type === TokenType.LSHIFT ? '<<' : '>>';
+      const right = this.addExpr();
+      left = { type: 'BinaryOp', op: op as '<<' | '>>', left, right, line: left.line, column: left.column };
+    }
+    return left;
   }
 
   private addExpr(): Expression {
@@ -1003,9 +1040,9 @@ export class Parser {
   }
 
   private unaryExpr(): Expression {
-    if (this.check(TokenType.MINUS) || this.check(TokenType.PLUS)) {
+    if (this.check(TokenType.MINUS) || this.check(TokenType.PLUS) || this.check(TokenType.TILDE)) {
       const token = this.advance();
-      const op = token.type === TokenType.MINUS ? '-' : '+';
+      const op = token.type === TokenType.MINUS ? '-' : token.type === TokenType.PLUS ? '+' : '~';
       const operand = this.unaryExpr();
       return {
         type: 'UnaryOp',

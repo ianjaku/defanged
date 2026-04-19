@@ -858,6 +858,16 @@ export class Interpreter {
           return pyNumber(((left.value % right.value) + right.value) % right.value); // Python-style modulo
         case '**':
           return pyNumber(Math.pow(left.value, right.value));
+        case '&':
+          return pyNumber(Math.trunc(left.value) & Math.trunc(right.value));
+        case '|':
+          return pyNumber(Math.trunc(left.value) | Math.trunc(right.value));
+        case '^':
+          return pyNumber(Math.trunc(left.value) ^ Math.trunc(right.value));
+        case '<<':
+          return pyNumber(Math.trunc(left.value) << Math.trunc(right.value));
+        case '>>':
+          return pyNumber(Math.trunc(left.value) >> Math.trunc(right.value));
       }
     }
 
@@ -890,6 +900,9 @@ export class Interpreter {
       case '+':
         if (isNumber(operand)) return operand;
         throw new TypeError(`bad operand type for unary +: '${operand.type}'`, line, column);
+      case '~':
+        if (isNumber(operand)) return pyNumber(~Math.trunc(operand.value));
+        throw new TypeError(`bad operand type for unary ~: '${operand.type}'`, line, column);
       case 'not':
         return pyBoolean(!isTruthy(operand));
       default:
