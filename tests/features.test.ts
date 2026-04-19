@@ -2047,3 +2047,19 @@ describe('implicit string concatenation', () => {
     expect(await runPython("'hello ' \"world\"")).toBe("hello world");
   });
 });
+
+// ─── Slice assignment ───────────────────────────────────────────────────────
+
+describe('slice assignment', () => {
+  test('replace middle elements', async () => {
+    expect(await runPython('x = [1, 2, 3, 4, 5]\nx[1:3] = [20, 30]\nx')).toEqual([1, 20, 30, 4, 5]);
+  });
+
+  test('replace with different length', async () => {
+    expect(await runPython('x = [1, 2, 3]\nx[1:2] = [10, 20, 30]\nx')).toEqual([1, 10, 20, 30, 3]);
+  });
+
+  test('delete via empty slice', async () => {
+    expect(await runPython('x = [1, 2, 3, 4]\nx[1:3] = []\nx')).toEqual([1, 4]);
+  });
+});

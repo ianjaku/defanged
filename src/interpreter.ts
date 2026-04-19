@@ -464,6 +464,27 @@ export class Interpreter {
         break;
       }
 
+      case 'Slice': {
+        const obj = await this.evaluate(target.object, env);
+        if (!isList(obj)) throw new TypeError(`'${obj.type}' object does not support slice assignment`, target.line, target.column);
+        const lower = target.lower ? await this.evaluate(target.lower, env) : null;
+        const upper = target.upper ? await this.evaluate(target.upper, env) : null;
+        const step = target.step ? await this.evaluate(target.step, env) : null;
+        let start = lower && isNumber(lower) ? lower.value : 0;
+        let end = upper && isNumber(upper) ? upper.value : obj.elements.length;
+        if (start < 0) start = Math.max(0, obj.elements.length + start);
+        if (end < 0) end = Math.max(0, obj.elements.length + end);
+        start = Math.min(start, obj.elements.length);
+        end = Math.min(end, obj.elements.length);
+        if (!isList(value) && !isTuple(value)) throw new TypeError('can only assign an iterable', target.line, target.column);
+        if (step === null || (isNumber(step) && step.value === 1)) {
+          obj.elements.splice(start, end - start, ...value.elements);
+        } else {
+          throw new TypeError('slice assignment with step is not supported', target.line, target.column);
+        }
+        break;
+      }
+
       default:
         throw new InterpreterError(`Cannot assign to ${target.type}`, target.line, target.column);
     }
