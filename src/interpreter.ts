@@ -284,6 +284,22 @@ export class Interpreter {
         return pyNone();
       }
 
+      case 'Del': {
+        for (const target of stmt.targets) {
+          await this.deleteTarget(target, env);
+        }
+        return pyNone();
+      }
+
+      case 'Assert': {
+        const test = await this.evaluate(stmt.test, env);
+        if (!isTruthy(test)) {
+          const msg = stmt.msg ? pyStr(await this.evaluate(stmt.msg, env)) : 'assertion error';
+          throw new InterpreterError(msg, stmt.line, stmt.column);
+        }
+        return pyNone();
+      }
+
       case 'Try': {
         let result: PyValue = pyNone();
         let caughtError: Error | null = null;
@@ -428,6 +444,37 @@ export class Interpreter {
 
       default:
         throw new InterpreterError(`Cannot assign to ${target.type}`, target.line, target.column);
+    }
+  }
+
+  private async deleteTarget(target: Expression, env: Environment): Promise<void> {
+    switch (target.type) {
+      case 'Identifier':
+        if (!env.has(target.name)) {
+          throw new NameError(target.name, target.line, target.column);
+        }
+        env.delete(target.name);
+        break;
+      case 'Subscript': {
+        const obj = await this.evaluate(target.object, env);
+        const index = await this.evaluate(target.index, env);
+        if (isList(obj)) {
+          if (!isNumber(index)) throw new TypeError('list indices must be integers', target.line, target.column);
+          let idx = index.value;
+          if (idx < 0) idx = obj.elements.length + idx;
+          if (idx < 0 || idx >= obj.elements.length) throw new IndexError('list assignment index out of range', target.line, target.column);
+          obj.elements.splice(idx, 1);
+        } else if (isDict(obj)) {
+          if (!isString(index) && !isNumber(index) && !isBoolean(index)) throw new TypeError('unhashable type for dict key', target.line, target.column);
+          if (!obj.entries.has(index.value)) throw new KeyError(String(index.value), target.line, target.column);
+          obj.entries.delete(index.value);
+        } else {
+          throw new TypeError(`'${obj.type}' object does not support item deletion`, target.line, target.column);
+        }
+        break;
+      }
+      default:
+        throw new InterpreterError(`Cannot delete ${target.type}`, target.line, target.column);
     }
   }
 

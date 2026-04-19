@@ -132,6 +132,13 @@ export class Environment {
     this.nonlocalNames.add(name);
   }
 
+  delete(name: string): boolean {
+    if (this.globalNames.has(name)) {
+      return this.getGlobal().variables.delete(name);
+    }
+    return this.variables.delete(name);
+  }
+
   has(name: string): boolean {
     if (this.variables.has(name)) return true;
     if (this.parent) return this.parent.has(name);

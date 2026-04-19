@@ -79,6 +79,8 @@ export class Parser {
     if (this.check(TokenType.RAISE)) return this.raiseStatement();
     if (this.check(TokenType.GLOBAL)) return this.globalStatement();
     if (this.check(TokenType.NONLOCAL)) return this.nonlocalStatement();
+    if (this.check(TokenType.DEL)) return this.delStatement();
+    if (this.check(TokenType.ASSERT)) return this.assertStatement();
 
     return this.assignmentOrExpression();
   }
@@ -443,6 +445,40 @@ export class Parser {
     return {
       type: 'Nonlocal',
       names,
+      line: token.line,
+      column: token.column,
+    };
+  }
+
+  private delStatement(): Statement {
+    const token = this.consume(TokenType.DEL, "Expected 'del'");
+    const targets: Expression[] = [];
+    targets.push(this.expression());
+    while (this.match(TokenType.COMMA)) {
+      if (this.check(TokenType.NEWLINE) || this.isAtEnd()) break;
+      targets.push(this.expression());
+    }
+    this.consumeNewline();
+    return {
+      type: 'Del',
+      targets,
+      line: token.line,
+      column: token.column,
+    };
+  }
+
+  private assertStatement(): Statement {
+    const token = this.consume(TokenType.ASSERT, "Expected 'assert'");
+    const test = this.expression();
+    let msg: Expression | null = null;
+    if (this.match(TokenType.COMMA)) {
+      msg = this.expression();
+    }
+    this.consumeNewline();
+    return {
+      type: 'Assert',
+      test,
+      msg,
       line: token.line,
       column: token.column,
     };

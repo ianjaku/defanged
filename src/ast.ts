@@ -262,6 +262,17 @@ export interface Nonlocal extends ASTNode {
   names: string[];
 }
 
+export interface Del extends ASTNode {
+  type: 'Del';
+  targets: Expression[];
+}
+
+export interface Assert extends ASTNode {
+  type: 'Assert';
+  test: Expression;
+  msg: Expression | null;
+}
+
 export interface Return extends ASTNode {
   type: 'Return';
   value: Expression | null;
@@ -308,6 +319,8 @@ export type Statement =
   | Try
   | Raise
   | Global
-  | Nonlocal;
+  | Nonlocal
+  | Del
+  | Assert;
 
 export type Program = Statement[];

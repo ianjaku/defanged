@@ -1589,3 +1589,46 @@ describe('str.format named placeholders', () => {
     expect(await runPython('"{0} is {age}".format("Alice", age=30)')).toBe('Alice is 30');
   });
 });
+
+// ─── del statement ──────────────────────────────────────────────────────────
+
+describe('del statement', () => {
+  test('del variable', async () => {
+    const output: string[] = [];
+    const interp = createInterpreter({ onPrint: (s) => output.push(s) });
+    await interp.run('x = 5\ndel x');
+    await expect(interp.run('x')).rejects.toThrow("not defined");
+  });
+
+  test('del dict key', async () => {
+    expect(await runPython('d = {"a": 1, "b": 2}\ndel d["a"]\nlist(d.keys())')).toEqual(["b"]);
+  });
+
+  test('del list element', async () => {
+    expect(await runPython('lst = [1, 2, 3]\ndel lst[1]\nlst')).toEqual([1, 3]);
+  });
+
+  test('del negative index', async () => {
+    expect(await runPython('lst = [1, 2, 3]\ndel lst[-1]\nlst')).toEqual([1, 2]);
+  });
+});
+
+// ─── assert statement ───────────────────────────────────────────────────────
+
+describe('assert statement', () => {
+  test('assert True passes', async () => {
+    expect(await runPython('assert True\n42')).toBe(42);
+  });
+
+  test('assert False raises', async () => {
+    await expect(runPython('assert False')).rejects.toThrow();
+  });
+
+  test('assert with message', async () => {
+    await expect(runPython('assert False, "oops"')).rejects.toThrow("oops");
+  });
+
+  test('assert expression', async () => {
+    expect(await runPython('x = 5\nassert x > 3\nx')).toBe(5);
+  });
+});

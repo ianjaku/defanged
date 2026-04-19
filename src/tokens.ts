@@ -37,6 +37,8 @@ export enum TokenType {
   RAISE = 'RAISE',
   GLOBAL = 'GLOBAL',
   NONLOCAL = 'NONLOCAL',
+  DEL = 'DEL',
+  ASSERT = 'ASSERT',
   IMPORT = 'IMPORT',
   FROM = 'FROM',
 
@@ -121,6 +123,8 @@ export const KEYWORDS: Record<string, TokenType> = {
   'raise': TokenType.RAISE,
   'global': TokenType.GLOBAL,
   'nonlocal': TokenType.NONLOCAL,
+  'del': TokenType.DEL,
+  'assert': TokenType.ASSERT,
   'import': TokenType.IMPORT,
   'from': TokenType.FROM,
   'True': TokenType.TRUE,
