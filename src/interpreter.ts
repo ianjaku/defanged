@@ -7,11 +7,14 @@ import {
   Statement,
   Expression,
   Comprehension,
+  Yield,
+  YieldFrom,
 } from './ast';
 import {
   PyValue,
   PyBuiltin,
   PyKwargs,
+  PyGenerator,
   Environment,
   pyNumber,
   pyString,
@@ -49,6 +52,7 @@ import {
   KeyError,
   ValueError,
   ZeroDivisionError,
+  StopIteration,
   MaxIterationsError,
 } from './errors';
 import { parse } from './parser';
@@ -60,6 +64,56 @@ class ReturnException {
 
 class BreakException {}
 class ContinueException {}
+
+class YieldException {
+  constructor(public value: PyValue) {}
+}
+
+function containsYield(stmts: Statement[]): boolean {
+  for (const stmt of stmts) {
+    if (stmtContainsYield(stmt)) return true;
+  }
+  return false;
+}
+
+function stmtContainsYield(stmt: Statement): boolean {
+  switch (stmt.type) {
+    case 'ExpressionStmt':
+      return exprContainsYield(stmt.expression);
+    case 'Assignment':
+      return stmt.targets.some(exprContainsYield) || exprContainsYield(stmt.value);
+    case 'AugmentedAssignment':
+      return exprContainsYield(stmt.target) || exprContainsYield(stmt.value);
+    case 'If':
+      return exprContainsYield(stmt.test) || containsYield(stmt.body) || containsYield(stmt.orelse);
+    case 'For':
+      return containsYield(stmt.body) || containsYield(stmt.orelse);
+    case 'While':
+      return containsYield(stmt.body) || containsYield(stmt.orelse);
+    case 'Return':
+      return stmt.value ? exprContainsYield(stmt.value) : false;
+    case 'Try':
+      return containsYield(stmt.body) ||
+        stmt.handlers.some(h => containsYield(h.body)) ||
+        containsYield(stmt.orelse) ||
+        containsYield(stmt.finalbody);
+    case 'FunctionDef':
+      // Nested function defs don't make the outer function a generator
+      return false;
+    default:
+      return false;
+  }
+}
+
+function exprContainsYield(expr: Expression): boolean {
+  switch (expr.type) {
+    case 'Yield':
+    case 'YieldFrom':
+      return true;
+    default:
+      return false;
+  }
+}
 
 export interface ToolDefinition {
   name: string;
@@ -182,21 +236,40 @@ export class Interpreter {
 
       case 'For': {
         const iter = await this.evaluate(stmt.iter, env);
-        const items = this.getIterableItems(iter, stmt.line, stmt.column);
 
         let result: PyValue = pyNone();
         let didBreak = false;
-        for (const item of items) {
-          this.checkIterations(stmt.line, stmt.column);
-          await this.assignTarget(stmt.target, item, env);
-          try {
-            result = await this.executeBlock(stmt.body, env);
-          } catch (e) {
-            if (e instanceof BreakException) { didBreak = true; break; }
-            if (e instanceof ContinueException) continue;
-            throw e;
+
+        if (iter.type === 'generator') {
+          // Async generator iteration
+          let genResult = await iter.next();
+          while (!genResult.done) {
+            this.checkIterations(stmt.line, stmt.column);
+            await this.assignTarget(stmt.target, genResult.value, env);
+            try {
+              result = await this.executeBlock(stmt.body, env);
+            } catch (e) {
+              if (e instanceof BreakException) { didBreak = true; break; }
+              if (e instanceof ContinueException) { genResult = await iter.next(); continue; }
+              throw e;
+            }
+            genResult = await iter.next();
+          }
+        } else {
+          const items = this.getIterableItems(iter, stmt.line, stmt.column);
+          for (const item of items) {
+            this.checkIterations(stmt.line, stmt.column);
+            await this.assignTarget(stmt.target, item, env);
+            try {
+              result = await this.executeBlock(stmt.body, env);
+            } catch (e) {
+              if (e instanceof BreakException) { didBreak = true; break; }
+              if (e instanceof ContinueException) continue;
+              throw e;
+            }
           }
         }
+
         if (!didBreak && stmt.orelse.length > 0) {
           result = await this.executeBlock(stmt.orelse, env);
         }
@@ -762,6 +835,41 @@ export class Interpreter {
         return value;
       }
 
+      case 'Yield': {
+        const value = expr.value ? await this.evaluate(expr.value, env) : pyNone();
+        // Find the yield function on the closest environment that has it
+        const yieldFn = this.findYieldFn(env);
+        if (!yieldFn) {
+          throw new InterpreterError("'yield' outside function", expr.line, expr.column);
+        }
+        return await yieldFn(value);
+      }
+
+      case 'YieldFrom': {
+        const iterable = await this.evaluate(expr.value, env);
+        const yieldFn = this.findYieldFn(env);
+        if (!yieldFn) {
+          throw new InterpreterError("'yield' outside function", expr.line, expr.column);
+        }
+
+        if (iterable.type === 'generator') {
+          // Delegate to sub-generator
+          let result = await iterable.next();
+          while (!result.done) {
+            await yieldFn(result.value);
+            result = await iterable.next();
+          }
+          return result.value;
+        }
+
+        // For regular iterables, yield each item
+        const items = this.getIterableItems(iterable, expr.line, expr.column);
+        for (const item of items) {
+          await yieldFn(item);
+        }
+        return pyNone();
+      }
+
       default: {
         const unknownExpr = expr as unknown as { type: string; line: number; column: number };
         throw new InterpreterError(`Unknown expression type: ${unknownExpr.type}`, unknownExpr.line, unknownExpr.column);
@@ -1132,6 +1240,11 @@ export class Interpreter {
         funcEnv.set(func.kwargsParam, pyDict(entries));
       }
 
+      // Generator function: if body contains yield, return a generator object
+      if (containsYield(func.body)) {
+        return this.createGenerator(func.name, func.body, funcEnv);
+      }
+
       try {
         await this.executeBlock(func.body, funcEnv);
         return pyNone();
@@ -1168,6 +1281,9 @@ export class Interpreter {
           items = [...iterable.elements];
         } else if (iterable.type === 'iterator') {
           items = [...iterable.values];
+        } else if (iterable.type === 'generator') {
+          const listVal = await this.exhaustGenerator(iterable);
+          items = (listVal as any).elements;
         } else if (isString(iterable)) {
           items = iterable.value.split('').map(c => pyString(c));
         } else if (isDict(iterable)) {
@@ -1297,9 +1413,170 @@ export class Interpreter {
         return pyIterator(results);
       }
       
+      case 'next': {
+        const iter = args[0];
+        const defaultVal = args[1];
+        if (!iter) throw new TypeError('next() missing required argument', line, column);
+        if (iter.type === 'generator') {
+          const result = await iter.next();
+          if (result.done) {
+            if (defaultVal !== undefined) return defaultVal;
+            throw new StopIteration(line, column);
+          }
+          return result.value;
+        }
+        if (iter.type === 'iterator') {
+          if (iter.index >= iter.values.length) {
+            if (defaultVal !== undefined) return defaultVal;
+            throw new StopIteration(line, column);
+          }
+          return iter.values[iter.index++];
+        }
+        throw new TypeError(`'${iter.type}' object is not an iterator`, line, column);
+      }
+
+      case 'list': {
+        const iterable = args[0];
+        if (iterable === undefined) return pyList([]);
+        if (iterable.type === 'generator') {
+          return await this.exhaustGenerator(iterable);
+        }
+        // Fall through to builtin for non-generator iterables
+        const listFn = this.builtins.get('list')!;
+        return listFn.fn(iterable);
+      }
+
+      case 'enumerate': {
+        if (args.length === 0) throw new TypeError('enumerate expected at least 1 argument, got 0', line, column);
+        const iterable = args[0];
+        let items: PyValue[];
+        if (iterable.type === 'generator') {
+          const listVal = await this.exhaustGenerator(iterable);
+          items = (listVal as any).elements;
+        } else if (isList(iterable) || isTuple(iterable)) {
+          items = iterable.elements;
+        } else if (iterable.type === 'iterator') {
+          items = iterable.values;
+        } else if (isString(iterable)) {
+          items = iterable.value.split('').map((c: string) => pyString(c));
+        } else {
+          throw new TypeError(`'${iterable.type}' object is not iterable`, line, column);
+        }
+        const startVal = kwargs.start && isNumber(kwargs.start) ? (kwargs.start as any).value
+          : (args[1] && isNumber(args[1]) ? (args[1] as any).value : 0);
+        const result = items.map((item: PyValue, i: number) =>
+          pyList([pyNumber(i + startVal), item])
+        );
+        return pyIterator(result);
+      }
+
       default:
         throw new TypeError(`Unknown special builtin: ${name}`, line, column);
     }
+  }
+
+  private createGenerator(name: string, body: Statement[], env: Environment): PyGenerator {
+    let resolveYield: ((sendVal: PyValue) => void) | null = null;
+    let resolveNext: ((result: { value: PyValue; done: boolean }) => void) | null = null;
+    let started = false;
+    let finished = false;
+
+    const interpreter = this;
+
+    const coroutine = async () => {
+      try {
+        await interpreter.executeBlock(body, env);
+      } catch (e) {
+        if (e instanceof ReturnException) {
+          // return in a generator means StopIteration
+        } else {
+          throw e;
+        }
+      }
+      // Generator is done
+      finished = true;
+      if (resolveNext) {
+        resolveNext({ value: pyNone(), done: true });
+        resolveNext = null;
+      }
+    };
+
+    // Override evaluate for Yield expressions: when the coroutine hits a yield,
+    // it signals the yielded value and waits for next() to resume it.
+    const originalEvaluate = this.evaluate.bind(this);
+
+    const yieldValue = (value: PyValue): Promise<PyValue> => {
+      return new Promise<PyValue>((resolve) => {
+        // Store the resume resolver so next() can call it
+        resolveYield = resolve;
+        // Signal the yielded value to whoever called next()
+        if (resolveNext) {
+          resolveNext({ value, done: false });
+          resolveNext = null;
+        }
+      });
+    };
+
+    // We need a different approach. Instead of patching evaluate,
+    // we use the YieldException mechanism: the coroutine runs, and when
+    // it hits a Yield expression, evaluate throws YieldException.
+    // The coroutine catches it at the top level and uses the promise channel.
+
+    // Actually, the cleanest approach: we run the generator body in a microtask,
+    // and Yield expressions write to a channel and suspend via await.
+    // The channel is a pair of promises that ping-pong between generator and caller.
+
+    const gen: PyGenerator = {
+      type: 'generator',
+      name,
+      started: false,
+      finished: false,
+      next: async (sendValue?: PyValue): Promise<{ value: PyValue; done: boolean }> => {
+        if (finished || gen.finished) {
+          return { value: pyNone(), done: true };
+        }
+
+        return new Promise<{ value: PyValue; done: boolean }>((resolve) => {
+          resolveNext = resolve;
+
+          if (!started) {
+            started = true;
+            gen.started = true;
+
+            // Patch yield handling into the environment
+            (env as any).__yieldFn = yieldValue;
+
+            // Start the coroutine
+            coroutine().catch((err) => {
+              finished = true;
+              gen.finished = true;
+              if (resolveNext) {
+                resolveNext = null;
+              }
+              // Re-throw to the caller
+              resolve(Promise.reject(err) as any);
+            });
+          } else {
+            // Resume the coroutine from where it yielded
+            if (resolveYield) {
+              const resume = resolveYield;
+              resolveYield = null;
+              resume(sendValue ?? pyNone());
+            } else {
+              // Coroutine already finished
+              finished = true;
+              gen.finished = true;
+              resolve({ value: pyNone(), done: true });
+            }
+          }
+        });
+      },
+    };
+
+    // Store the yield function on the environment so evaluate can find it
+    (env as any).__yieldFn = yieldValue;
+
+    return gen;
   }
 
   private subscript(obj: PyValue, index: PyValue, line: number, column: number): PyValue {
@@ -1467,6 +1744,25 @@ export class Interpreter {
     throw new TypeError(`'${value.type}' object is not iterable`, line, column);
   }
 
+  private async exhaustGenerator(gen: PyGenerator): Promise<PyValue> {
+    const items: PyValue[] = [];
+    let result = await gen.next();
+    while (!result.done) {
+      items.push(result.value);
+      result = await gen.next();
+    }
+    return pyList(items);
+  }
+
+  private findYieldFn(env: Environment): ((value: PyValue) => Promise<PyValue>) | null {
+    let current: Environment | undefined = env;
+    while (current) {
+      if ((current as any).__yieldFn) return (current as any).__yieldFn;
+      current = current.getParent();
+    }
+    return null;
+  }
+
   private checkIterations(line: number, column: number): void {
     this.iterationCount++;
     if (this.iterationCount > this.maxIterations) {
@@ -1486,7 +1782,8 @@ export class Interpreter {
     
     // Map our error types to Python exception names
     const errorTypeMap: Record<string, string[]> = {
-      'Exception': ['TypeError', 'NameError', 'KeyError', 'IndexError', 'ZeroDivisionError', 'ValueError', 'SyntaxError', 'AttributeError', 'InterpreterError'],
+      'Exception': ['TypeError', 'NameError', 'KeyError', 'IndexError', 'ZeroDivisionError', 'ValueError', 'SyntaxError', 'AttributeError', 'StopIteration', 'InterpreterError'],
+      'StopIteration': ['StopIteration'],
       'TypeError': ['TypeError'],
       'NameError': ['NameError'],
       'KeyError': ['KeyError'],

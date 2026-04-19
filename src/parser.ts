@@ -82,6 +82,7 @@ export class Parser {
     if (this.check(TokenType.NONLOCAL)) return this.nonlocalStatement();
     if (this.check(TokenType.DEL)) return this.delStatement();
     if (this.check(TokenType.ASSERT)) return this.assertStatement();
+    if (this.check(TokenType.YIELD)) return this.yieldStatement();
 
     return this.assignmentOrExpression();
   }
@@ -599,6 +600,45 @@ export class Parser {
       handlers,
       orelse,
       finalbody,
+      line: token.line,
+      column: token.column,
+    };
+  }
+
+  private yieldStatement(): Statement {
+    const token = this.consume(TokenType.YIELD, "Expected 'yield'");
+    let expr: Expression;
+
+    if (this.check(TokenType.FROM)) {
+      this.advance(); // consume 'from'
+      const value = this.expression();
+      expr = {
+        type: 'YieldFrom',
+        value,
+        line: token.line,
+        column: token.column,
+      };
+    } else if (!this.check(TokenType.NEWLINE) && !this.isAtEnd()) {
+      const value = this.expression();
+      expr = {
+        type: 'Yield',
+        value,
+        line: token.line,
+        column: token.column,
+      };
+    } else {
+      expr = {
+        type: 'Yield',
+        value: null,
+        line: token.line,
+        column: token.column,
+      };
+    }
+
+    this.consumeNewline();
+    return {
+      type: 'ExpressionStmt',
+      expression: expr,
       line: token.line,
       column: token.column,
     };

@@ -65,6 +65,13 @@ export class ZeroDivisionError extends InterpreterError {
   }
 }
 
+export class StopIteration extends InterpreterError {
+  constructor(line: number, column: number) {
+    super('StopIteration', line, column);
+    this.name = 'StopIteration';
+  }
+}
+
 export class MaxIterationsError extends InterpreterError {
   constructor(line: number, column: number) {
     super('Maximum iterations exceeded (possible infinite loop)', line, column);

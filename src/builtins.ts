@@ -302,38 +302,40 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
   });
 
   // list(iterable) - Convert to list
+  // Marked requiresInterpreter for generator support (async iteration)
   builtins.set('list', {
     type: 'builtin',
     name: 'list',
+    requiresInterpreter: true,
     fn: (iterable?: PyValue): PyValue => {
       if (iterable === undefined) return pyList([]);
-      
+
       if (isList(iterable)) return pyList([...iterable.elements]);
       if (isTuple(iterable)) return pyList([...iterable.elements]);
       if (isString(iterable)) {
         return pyList(iterable.value.split('').map(c => pyString(c)));
       }
       if (isDict(iterable)) {
-        return pyList(Array.from(iterable.entries.keys()).map(k => 
-          typeof k === 'string' ? pyString(k) : 
-          typeof k === 'number' ? pyNumber(k) : 
+        return pyList(Array.from(iterable.entries.keys()).map(k =>
+          typeof k === 'string' ? pyString(k) :
+          typeof k === 'number' ? pyNumber(k) :
           pyBoolean(k as boolean)
         ));
       }
       if (isSet(iterable)) {
-        return pyList(Array.from(iterable.values).map(v => 
-          typeof v === 'string' ? pyString(v) : 
-          typeof v === 'number' ? pyNumber(v) : 
+        return pyList(Array.from(iterable.values).map(v =>
+          typeof v === 'string' ? pyString(v) :
+          typeof v === 'number' ? pyNumber(v) :
           pyBoolean(v as boolean)
         ));
       }
       if (iterable.type === 'iterator') {
         return pyList([...iterable.values]);
       }
-      
+
       throw new TypeError(`'${iterable.type}' object is not iterable`, 0, 0);
     },
-  });
+  } as any);
 
   // tuple(iterable) - Convert to tuple
   builtins.set('tuple', {
@@ -598,10 +600,12 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
   });
 
   // enumerate(iterable, start=0) - Return enumerate object
+  // Marked requiresInterpreter for generator support
   builtins.set('enumerate', {
     type: 'builtin',
     name: 'enumerate',
     acceptsKwargs: true,
+    requiresInterpreter: true,
     fn: (...rawArgs: (PyValue | PyKwargs)[]): PyValue => {
       const { args, kwargs } = extractKwargs(rawArgs);
       const iterable = args[0];
@@ -625,7 +629,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
 
       return pyIterator(result);
     },
-  });
+  } as any);
 
   // zip(*iterables) - Zip iterables together
   builtins.set('zip', {
@@ -782,18 +786,22 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
   });
 
   // next(iterator[, default]) - Get next item
+  // Generator support is handled by the interpreter via requiresInterpreter
   builtins.set('next', {
     type: 'builtin',
     name: 'next',
+    requiresInterpreter: true,
     fn: (iter: PyValue, defaultVal?: PyValue): PyValue => {
-      if (iter.type !== 'iterator') throw new TypeError(`'${iter.type}' object is not an iterator`, 0, 0);
-      if (iter.index >= iter.values.length) {
-        if (defaultVal !== undefined) return defaultVal;
-        throw new ValueError('StopIteration', 0, 0);
+      if (iter.type === 'iterator') {
+        if (iter.index >= iter.values.length) {
+          if (defaultVal !== undefined) return defaultVal;
+          throw new ValueError('StopIteration', 0, 0);
+        }
+        return iter.values[iter.index++];
       }
-      return iter.values[iter.index++];
+      throw new TypeError(`'${iter.type}' object is not an iterator`, 0, 0);
     },
-  });
+  } as any);
 
   // hash(obj) - Return hash value
   builtins.set('hash', {
@@ -856,6 +864,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
         'function': 'function',
         'builtin': 'builtin_function_or_method',
         'iterator': 'iterator',
+        'generator': 'generator',
       };
       return pyString(`<class '${typeNames[obj.type] || obj.type}'>`);
     },
@@ -1112,7 +1121,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
   });
 
   // Exception constructors — return a tagged value that `raise` can inspect
-  for (const name of ['Exception', 'ValueError', 'TypeError', 'KeyError', 'IndexError', 'ZeroDivisionError', 'NameError', 'RuntimeError']) {
+  for (const name of ['Exception', 'ValueError', 'TypeError', 'KeyError', 'IndexError', 'ZeroDivisionError', 'NameError', 'RuntimeError', 'StopIteration']) {
     builtins.set(name, {
       type: 'builtin',
       name,

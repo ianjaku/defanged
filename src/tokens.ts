@@ -41,6 +41,7 @@ export enum TokenType {
   ASSERT = 'ASSERT',
   IMPORT = 'IMPORT',
   FROM = 'FROM',
+  YIELD = 'YIELD',
 
   // Operators
   PLUS = 'PLUS',           // +
@@ -136,6 +137,7 @@ export const KEYWORDS: Record<string, TokenType> = {
   'assert': TokenType.ASSERT,
   'import': TokenType.IMPORT,
   'from': TokenType.FROM,
+  'yield': TokenType.YIELD,
   'True': TokenType.TRUE,
   'False': TokenType.FALSE,
   'None': TokenType.NONE,

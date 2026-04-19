@@ -11,7 +11,7 @@ Tested against the current codebase on 2026-04-19. Items marked ✅ have been fi
 3. ✅ ~~`del` statement~~
 4. ✅ ~~`assert` statement~~
 5. ✅ ~~`global` / `nonlocal` declarations~~
-6. **`yield` / generators** — `yield 1` fails; no generator support
+6. ✅ ~~`yield` / generators~~
 7. **`with` statement (context managers)** — fails at parse
 8. ✅ ~~`for...else` / `while...else`~~
 9. ✅ ~~`try...except...else`~~

@@ -1,6 +1,6 @@
 # tespy-parser: Feature Support Matrix
 
-A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**614 pass / 0 fail** as of 2026-04-19).
+A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**630 pass / 0 fail** as of 2026-04-19).
 
 Explanations are written for TypeScript developers who may not know Python.
 
@@ -237,11 +237,42 @@ sorted(['banana', 'apple'], key=lambda x: len(x))  # ['apple', 'banana']
 ```
 Lambdas with function calls in their bodies can be passed directly as keyword arguments (e.g., `key=`). No need to assign to a variable first.
 
+### Generators / `yield`
+```python
+def count_up(n):
+    i = 0
+    while i < n:
+        yield i
+        i += 1
+
+list(count_up(5))            # [0, 1, 2, 3, 4]
+
+g = count_up(3)
+next(g)                      # 0
+next(g)                      # 1
+next(g)                      # 2
+```
+A generator function contains `yield` in its body. Calling it returns a generator object instead of executing the body immediately. Each call to `next()` resumes execution until the next `yield`, which produces a value and suspends. When the function body completes, `StopIteration` is raised.
+
+In TypeScript, the closest analogue is an `async function*` (async generator), though Python generators are synchronous from the caller's perspective.
+
+Supported:
+- `yield value` and bare `yield` (yields `None`)
+- `yield from iterable` — delegates to a sub-generator or any iterable
+- Generators work with `for` loops, `list()`, `sorted()`, `enumerate()`, and `next()`
+- Multiple independent generators can be active simultaneously
+- `StopIteration` exception when exhausted
+- `next(gen, default)` returns `default` instead of raising `StopIteration`
+
+Not yet supported:
+- `gen.send(value)` — sending values into a generator
+- `gen.throw()` / `gen.close()` — generator cleanup protocol
+
 ---
 
 ## ❌ Known Missing Features
 
-See `missing.md` for the full list. Major gaps: `class` definitions, `with` statement (context managers), `yield`/generators.
+See `missing.md` for the full list. Major gaps: `class` definitions, `with` statement (context managers).
 
 ---
 

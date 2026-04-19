@@ -16,7 +16,8 @@ export type PyValue =
   | PyFunction
   | PyBuiltin
   | PyKwargs
-  | PyIterator;
+  | PyIterator
+  | PyGenerator;
 
 export interface PyNumber {
   type: 'number';
@@ -88,6 +89,14 @@ export interface PyIterator {
   index: number;
 }
 
+export interface PyGenerator {
+  type: 'generator';
+  name: string;
+  started: boolean;
+  finished: boolean;
+  next: (sendValue?: PyValue) => Promise<{ value: PyValue; done: boolean }>;
+}
+
 /**
  * Environment for variable scoping
  */
@@ -99,6 +108,10 @@ export class Environment {
 
   constructor(parent?: Environment) {
     this.parent = parent;
+  }
+
+  getParent(): Environment | undefined {
+    return this.parent;
   }
 
   get(name: string): PyValue | undefined {
@@ -235,6 +248,8 @@ export function isTruthy(value: PyValue): boolean {
       return Object.keys(value.values).length > 0;
     case 'iterator':
       return true;
+    case 'generator':
+      return true;
   }
 }
 
@@ -284,13 +299,14 @@ export function isCallable(value: PyValue): value is PyFunction | PyBuiltin {
   return value.type === 'function' || value.type === 'builtin';
 }
 
-export function isIterable(value: PyValue): value is PyList | PyTuple | PyString | PyDict | PySet | PyIterator {
-  return value.type === 'list' || 
-         value.type === 'tuple' || 
-         value.type === 'string' || 
+export function isIterable(value: PyValue): value is PyList | PyTuple | PyString | PyDict | PySet | PyIterator | PyGenerator {
+  return value.type === 'list' ||
+         value.type === 'tuple' ||
+         value.type === 'string' ||
          value.type === 'dict' ||
          value.type === 'set' ||
-         value.type === 'iterator';
+         value.type === 'iterator' ||
+         value.type === 'generator';
 }
 
 // ============ String Representation ============
@@ -337,6 +353,8 @@ export function pyRepr(value: PyValue): string {
     }
     case 'iterator':
       return `<iterator>`;
+    case 'generator':
+      return `<generator object ${value.name}>`;
   }
 }
 
@@ -415,6 +433,8 @@ export function pyEquals(a: PyValue, b: PyValue): boolean {
     }
     case 'iterator':
       return a === b;
+    case 'generator':
+      return a === b;
   }
 }
 
@@ -483,5 +503,7 @@ export function valueToJs(value: PyValue): any {
     }
     case 'iterator':
       return value.values.map(valueToJs);
+    case 'generator':
+      return `<generator object ${value.name}>`;
   }
 }

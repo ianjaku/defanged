@@ -172,6 +172,16 @@ export interface Starred extends ASTNode {
   value: Expression;
 }
 
+export interface Yield extends ASTNode {
+  type: 'Yield';
+  value: Expression | null;
+}
+
+export interface YieldFrom extends ASTNode {
+  type: 'YieldFrom';
+  value: Expression;
+}
+
 export type Expression =
   | NumberLiteral
   | StringLiteral
@@ -197,7 +207,9 @@ export type Expression =
   | Lambda
   | FString
   | NamedExpr
-  | Starred;
+  | Starred
+  | Yield
+  | YieldFrom;
 
 // ============ Statements ============
 

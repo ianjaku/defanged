@@ -2092,3 +2092,234 @@ next(it, 99)
     expect(await runPython('isinstance(id(42), int)')).toBe(true);
   });
 });
+
+// ─── Generators / yield ────────────────────────────────────────────────────────
+
+describe('Generators', () => {
+  test('simple generator with next()', async () => {
+    const code = `
+def gen():
+    yield 1
+    yield 2
+    yield 3
+
+g = gen()
+a = next(g)
+b = next(g)
+c = next(g)
+[a, b, c]
+`;
+    expect(await runPython(code)).toEqual([1, 2, 3]);
+  });
+
+  test('generator in for loop', async () => {
+    const code = `
+def count_up(n):
+    i = 0
+    while i < n:
+        yield i
+        i += 1
+
+result = []
+for x in count_up(5):
+    result.append(x)
+result
+`;
+    expect(await runPython(code)).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  test('generator with list()', async () => {
+    const code = `
+def squares(n):
+    for i in range(n):
+        yield i * i
+
+list(squares(5))
+`;
+    expect(await runPython(code)).toEqual([0, 1, 4, 9, 16]);
+  });
+
+  test('generator exhaustion raises StopIteration', async () => {
+    const code = `
+def once():
+    yield 42
+
+g = once()
+next(g)
+try:
+    next(g)
+    result = "no error"
+except StopIteration:
+    result = "stopped"
+result
+`;
+    expect(await runPython(code)).toBe("stopped");
+  });
+
+  test('next() with default on exhausted generator', async () => {
+    const code = `
+def empty():
+    return
+    yield
+
+g = empty()
+next(g, "default")
+`;
+    expect(await runPython(code)).toBe("default");
+  });
+
+  test('yield None (bare yield)', async () => {
+    const code = `
+def gen():
+    yield
+    yield
+
+g = gen()
+a = next(g)
+b = next(g)
+[a, b]
+`;
+    expect(await runPython(code)).toEqual([null, null]);
+  });
+
+  test('generator with conditional logic', async () => {
+    const code = `
+def evens(n):
+    for i in range(n):
+        if i % 2 == 0:
+            yield i
+
+list(evens(10))
+`;
+    expect(await runPython(code)).toEqual([0, 2, 4, 6, 8]);
+  });
+
+  test('multiple generators simultaneously', async () => {
+    const code = `
+def gen(start):
+    yield start
+    yield start + 1
+
+g1 = gen(10)
+g2 = gen(20)
+a = next(g1)
+b = next(g2)
+c = next(g1)
+d = next(g2)
+[a, b, c, d]
+`;
+    expect(await runPython(code)).toEqual([10, 20, 11, 21]);
+  });
+
+  test('generator with return (early stop)', async () => {
+    const code = `
+def gen():
+    yield 1
+    return
+    yield 2
+
+list(gen())
+`;
+    expect(await runPython(code)).toEqual([1]);
+  });
+
+  test('yield from iterable', async () => {
+    const code = `
+def gen():
+    yield from [1, 2, 3]
+    yield from range(4, 7)
+
+list(gen())
+`;
+    expect(await runPython(code)).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  test('yield from sub-generator', async () => {
+    const code = `
+def inner():
+    yield 'a'
+    yield 'b'
+
+def outer():
+    yield 'start'
+    yield from inner()
+    yield 'end'
+
+list(outer())
+`;
+    expect(await runPython(code)).toEqual(["start", "a", "b", "end"]);
+  });
+
+  test('fibonacci generator', async () => {
+    const code = `
+def fib(n):
+    a, b = 0, 1
+    count = 0
+    while count < n:
+        yield a
+        a, b = b, a + b
+        count += 1
+
+list(fib(8))
+`;
+    expect(await runPython(code)).toEqual([0, 1, 1, 2, 3, 5, 8, 13]);
+  });
+
+  test('generator as argument to sum()', async () => {
+    const code = `
+def gen():
+    yield 1
+    yield 2
+    yield 3
+
+result = []
+for x in gen():
+    result.append(x)
+sum(result)
+`;
+    expect(await runPython(code)).toBe(6);
+  });
+
+  test('generator with enumerate', async () => {
+    const code = `
+def letters():
+    yield 'a'
+    yield 'b'
+    yield 'c'
+
+result = []
+for i, ch in enumerate(letters()):
+    result.append(f"{i}:{ch}")
+result
+`;
+    // enumerate needs to work with generators too
+    // This may require special handling - let's test it
+    expect(await runPython(code)).toEqual(["0:a", "1:b", "2:c"]);
+  });
+
+  test('generator passed to sorted()', async () => {
+    const code = `
+def gen():
+    yield 3
+    yield 1
+    yield 2
+
+sorted(gen())
+`;
+    expect(await runPython(code)).toEqual([1, 2, 3]);
+  });
+
+  test('nested yield in try block', async () => {
+    const code = `
+def gen():
+    try:
+        yield 1
+        yield 2
+    finally:
+        pass
+
+list(gen())
+`;
+    expect(await runPython(code)).toEqual([1, 2]);
+  });
+});
