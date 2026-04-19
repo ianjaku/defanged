@@ -4,7 +4,7 @@ Guidance for AI assistants working on this repo. Keep it tight.
 
 ## What this project is
 
-`defang` is a **sandboxed Python interpreter written in TypeScript**. It exists so that LLMs and agents can emit Python and have it executed safely from a Node/Bun host, with no filesystem, network, or subprocess access.
+`defanged` is a **sandboxed Python interpreter written in TypeScript**. It exists so that LLMs and agents can emit Python and have it executed safely from a Node/Bun host, with no filesystem, network, or subprocess access.
 
 The contract: **behave like CPython for the supported subset**. When behavior is ambiguous, open a real Python REPL and match what it does.
 

@@ -1,5 +1,5 @@
 {
-  "name": "defang",
+  "name": "defanged",
   "version": "0.1.0",
   "description": "A sandboxed Python interpreter written in TypeScript. Safely run Python code emitted by LLMs and agents — no filesystem, no network, no escape.",
   "keywords": [
@@ -13,13 +13,13 @@
     "code-execution",
     "safe-eval"
   ],
-  "homepage": "https://github.com/ianjaku/defang#readme",
+  "homepage": "https://github.com/ianjaku/defanged#readme",
   "bugs": {
-    "url": "https://github.com/ianjaku/defang/issues"
+    "url": "https://github.com/ianjaku/defanged/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ianjaku/defang.git"
+    "url": "git+https://github.com/ianjaku/defanged.git"
   },
   "license": "MIT",
   "author": "Ian Jakubek <ian@invacto.com>",

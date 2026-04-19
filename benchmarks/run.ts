@@ -1,5 +1,5 @@
 /**
- * Standalone benchmark suite for the defang interpreter.
+ * Standalone benchmark suite for the defanged interpreter.
  *
  * Usage:
  *   bun benchmarks/run.ts            # run all benchmarks
@@ -334,7 +334,7 @@ function formatTable(results: Result[]): void {
   const sep = '─'.repeat(header.length);
 
   console.log();
-  console.log('  defang interpreter benchmarks');
+  console.log('  defanged interpreter benchmarks');
   console.log(`  ${sep}`);
   console.log(`  ${header}`);
   console.log(`  ${sep}`);
