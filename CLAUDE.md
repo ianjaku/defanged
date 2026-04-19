@@ -30,7 +30,13 @@ Supporting files: `src/ast.ts` (node types), `src/values.ts` (runtime values), `
 bun test                        # full suite
 bun test tests/features.test.ts # behavioral surface
 bun run typecheck
+bun bench                       # performance benchmarks (median/min/max)
+bun bench --json                # machine-readable output
 ```
+
+## Performance
+
+Run `bun bench` **before and after** every feature change. Compare the output and note any significant differences (>20% regression on any benchmark) in the commit message. If a feature unavoidably regresses performance, explain the tradeoff in the commit body.
 
 ## Where feature status lives
 
