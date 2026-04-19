@@ -1,6 +1,6 @@
 # tespy-parser: Feature Support Matrix
 
-A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**538 pass / 0 fail** as of 2026-04-18).
+A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**614 pass / 0 fail** as of 2026-04-19).
 
 Explanations are written for TypeScript developers who may not know Python.
 
@@ -63,6 +63,12 @@ Note the shared-reference caveat with mutable values: `a = b = []` means `a` and
 | `s.zfill(n)` | Pad left with zeros | `s.padStart(n, '0')` |
 | `s.ljust(n)` / `s.rjust(n)` / `s.center(n)` | Pad right / left / both sides | `s.padEnd(n)` / `s.padStart(n)` / — |
 | `s.format(...)` | Named/positional placeholder substitution | template literals |
+| `s.isupper()` / `s.islower()` | Case check predicates | no direct equivalent |
+| `s.istitle()` | True if titlecased | no direct equivalent |
+| `s.partition(sep)` / `s.rpartition(sep)` | Split into 3-tuple at first/last sep | no direct equivalent |
+| `s.splitlines()` | Split on line boundaries | `s.split(/\r\n\|\r\|\n/)` |
+| `s.expandtabs(n)` | Replace tabs with spaces | no direct equivalent |
+| `s.removeprefix(p)` / `s.removesuffix(s)` | Strip prefix/suffix (3.9+) | no direct equivalent |
 | `s * n` | Repeat string `n` times | `s.repeat(n)` |
 
 ### `str()`, `float()`, and `int()` conversions
@@ -134,6 +140,8 @@ Dict comprehensions (`{k: v for k, v in items}`) also work.
 - Keyword arguments: `f(a=1, b=2)`
 - `*args` (rest parameter): `def f(*args): return len(args)` — like `function f(...args)` in TS
 - `**kwargs` (keyword rest): `def f(**kwargs): return kwargs["key"]` — collects keyword args into a dict
+- `*list` / `**dict` unpacking in calls: `f(*args, **kwargs)` — spreads iterables/dicts into arguments
+- `@decorator` syntax — decorators wrap functions, applied bottom-up
 - Recursion, nested functions, closures
 - Lambdas: `lambda x: x * 2` — like `(x) => x * 2`
 - Early return with `return`
@@ -144,12 +152,14 @@ Dict comprehensions (`{k: v for k, v in items}`) also work.
 - `for...else` / `while...else` — the `else` clause runs if the loop completes without `break` (no TS equivalent)
 - `while`, `break`, `continue`
 - `raise` statement — `raise ValueError("x")` — like `throw new Error("x")` in TS
-- `try / except / finally` (Python's name for catch)
+- `del` statement — `del x`, `del d["key"]`, `del lst[0]`
+- `assert` statement — `assert x > 0, "must be positive"`
+- `try / except / else / finally` (Python's name for catch)
 - Chained comparisons: `1 < x < 10` (equivalent to `1 < x && x < 10`)
 - Short-circuit `and` / `or` (note: they return the operand, not a boolean — like `&&` / `||` in TS)
 
 ### Built-ins
-Working: `len`, `range`, `print`, `abs`, `min`, `max`, `sum`, `round`, `sorted` *(on lists, tuples, dicts, and strings)*, `reversed`, `enumerate`, `zip`, `map`, `filter`, `any`, `all`, `type`, `isinstance`, `repr`, `hex`, `oct`, `bin`, `ord`, `chr`.
+Working: `len`, `range`, `print` *(with `sep`/`end` kwargs)*, `abs`, `min`, `max`, `sum`, `round` *(banker's rounding)*, `sorted`, `reversed`, `enumerate` *(with `start=`)*, `zip`, `map`, `filter`, `any`, `all`, `type`, `isinstance` *(accepts type builtins and tuples)*, `repr`, `hex`, `oct`, `bin`, `ord`, `chr`, `pow` *(with optional modulo)*, `divmod`, `callable`, `iter`, `next`, `hash`, `id`, `tuple`.
 
 Exception constructors: `Exception`, `ValueError`, `TypeError`, `KeyError`, `IndexError`, `ZeroDivisionError`, `NameError`, `RuntimeError` — all work with `raise` and `except`.
 
@@ -183,6 +193,12 @@ Triple-quoted strings work: `"""multi\nline"""`.
 3.14_15       # underscores in floats too
 ```
 Python supports hex (`0x`), octal (`0o`), and binary (`0b`) prefixes, plus underscore digit separators for readability. No direct TS equivalent for the underscore separators (TS uses `_` too, but only in numeric literals since ES2021).
+
+### Operators
+Arithmetic: `+`, `-`, `*`, `/`, `//`, `%`, `**`.
+Bitwise: `&`, `|`, `^`, `~`, `<<`, `>>`.
+String: `%` formatting (`"%s is %d" % ("age", 25)`), `+` concatenation, `*` repetition.
+Assignment: `a, *b, c = [1, 2, 3, 4, 5]` (starred unpacking), slice assignment (`x[1:3] = [20, 30]`).
 
 ### Scope and closures
 - Functions capture their enclosing scope (lexical scoping, same as TS).
@@ -225,7 +241,7 @@ Lambdas with function calls in their bodies can be passed directly as keyword ar
 
 ## ❌ Known Missing Features
 
-See `missing.md` for a comprehensive list. Major gaps include: `class` definitions, `del`/`assert`/`with` statements, `yield`/generators, decorators, bitwise operators, `*`/`**` unpacking in calls, starred assignment, slice assignment, and several builtins (`pow`, `divmod`, `callable`, `iter`/`next`, `tuple()` constructor).
+See `missing.md` for the full list. Major gaps: `class` definitions, `with` statement (context managers), `yield`/generators.
 
 ---
 

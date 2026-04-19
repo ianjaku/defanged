@@ -70,7 +70,7 @@ export function compareValues(a: PyValue, b: PyValue): number {
  */
 export function applyKeyFunction(func: PyValue, item: PyValue): PyValue {
   if (func.type === 'builtin') {
-    return func.fn(item);
+    return func.fn(item) as PyValue;
   }
 
   if (func.type !== 'function') {
@@ -111,7 +111,7 @@ function evaluateKeyExpression(expr: any, paramName: string, paramValue: PyValue
       const func = evaluateKeyExpression(expr.func, paramName, paramValue);
       if (func.type === 'builtin') {
         const args = expr.args.map((a: any) => evaluateKeyExpression(a, paramName, paramValue));
-        return func.fn(...args);
+        return func.fn(...args) as PyValue;
       }
       throw new TypeError('key function calls must use builtin functions', 0, 0);
     }
