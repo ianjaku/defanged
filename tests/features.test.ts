@@ -1855,3 +1855,49 @@ describe("round() banker's rounding", () => {
     expect(await runPython('round(3.5)')).toBe(4);
   });
 });
+
+// ─── Additional string methods ──────────────────────────────────────────────
+
+describe('additional string methods', () => {
+  test('isupper / islower', async () => {
+    expect(await runPython('"HELLO".isupper()')).toBe(true);
+    expect(await runPython('"hello".islower()')).toBe(true);
+    expect(await runPython('"Hello".isupper()')).toBe(false);
+    expect(await runPython('"Hello".islower()')).toBe(false);
+  });
+
+  test('partition', async () => {
+    expect(await runPython('"hello-world".partition("-")')).toEqual(["hello", "-", "world"]);
+    expect(await runPython('"hello".partition("-")')).toEqual(["hello", "", ""]);
+  });
+
+  test('rpartition', async () => {
+    expect(await runPython('"a-b-c".rpartition("-")')).toEqual(["a-b", "-", "c"]);
+  });
+
+  test('splitlines', async () => {
+    expect(await runPython('"one\\ntwo\\nthree".splitlines()')).toEqual(["one", "two", "three"]);
+  });
+
+  test('removeprefix / removesuffix', async () => {
+    expect(await runPython('"TestHook".removeprefix("Test")')).toBe("Hook");
+    expect(await runPython('"MiscTests".removesuffix("Tests")')).toBe("Misc");
+    expect(await runPython('"NoMatch".removeprefix("X")')).toBe("NoMatch");
+  });
+
+  test('expandtabs', async () => {
+    expect(await runPython('"01\\t012\\t0123\\t01234".expandtabs()')).toBe("01      012     0123    01234");
+  });
+});
+
+// ─── dict.popitem ───────────────────────────────────────────────────────────
+
+describe('dict.popitem', () => {
+  test('removes and returns last item', async () => {
+    expect(await runPython('d = {"a": 1, "b": 2}\nd.popitem()')).toEqual(["b", 2]);
+  });
+
+  test('raises on empty dict', async () => {
+    await expect(runPython('{}.popitem()')).rejects.toThrow();
+  });
+});

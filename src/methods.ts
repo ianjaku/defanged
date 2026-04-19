@@ -281,6 +281,101 @@ export function getStringMethod(obj: PyValue & { type: 'string' }, attr: string,
         return pyString(fillChar.repeat(left) + str + fillChar.repeat(right));
       },
     },
+    isupper: {
+      type: 'builtin',
+      name: 'str.isupper',
+      fn: () => pyBoolean(str.length > 0 && str === str.toUpperCase() && str !== str.toLowerCase()),
+    },
+    islower: {
+      type: 'builtin',
+      name: 'str.islower',
+      fn: () => pyBoolean(str.length > 0 && str === str.toLowerCase() && str !== str.toUpperCase()),
+    },
+    istitle: {
+      type: 'builtin',
+      name: 'str.istitle',
+      fn: () => {
+        if (str.length === 0) return pyBoolean(false);
+        const titled = str.replace(/\b\w/g, c => c.toUpperCase());
+        return pyBoolean(str === titled && /[A-Z]/.test(str));
+      },
+    },
+    partition: {
+      type: 'builtin',
+      name: 'str.partition',
+      fn: (sep: PyValue) => {
+        if (!isString(sep)) throw new TypeError('partition() arg must be str', line, column);
+        const idx = str.indexOf(sep.value);
+        if (idx === -1) {
+          return pyList([pyString(str), pyString(''), pyString('')]);
+        }
+        return pyList([
+          pyString(str.slice(0, idx)),
+          pyString(sep.value),
+          pyString(str.slice(idx + sep.value.length)),
+        ]);
+      },
+    },
+    rpartition: {
+      type: 'builtin',
+      name: 'str.rpartition',
+      fn: (sep: PyValue) => {
+        if (!isString(sep)) throw new TypeError('rpartition() arg must be str', line, column);
+        const idx = str.lastIndexOf(sep.value);
+        if (idx === -1) {
+          return pyList([pyString(''), pyString(''), pyString(str)]);
+        }
+        return pyList([
+          pyString(str.slice(0, idx)),
+          pyString(sep.value),
+          pyString(str.slice(idx + sep.value.length)),
+        ]);
+      },
+    },
+    splitlines: {
+      type: 'builtin',
+      name: 'str.splitlines',
+      fn: () => pyList(str.split(/\r\n|\r|\n/).map(s => pyString(s))),
+    },
+    expandtabs: {
+      type: 'builtin',
+      name: 'str.expandtabs',
+      fn: (tabsize?: PyValue) => {
+        const size = tabsize && isNumber(tabsize) ? Math.floor(tabsize.value) : 8;
+        let result = '';
+        let col = 0;
+        for (const ch of str) {
+          if (ch === '\t') {
+            const spaces = size - (col % size);
+            result += ' '.repeat(spaces);
+            col += spaces;
+          } else if (ch === '\n' || ch === '\r') {
+            result += ch;
+            col = 0;
+          } else {
+            result += ch;
+            col++;
+          }
+        }
+        return pyString(result);
+      },
+    },
+    removeprefix: {
+      type: 'builtin',
+      name: 'str.removeprefix',
+      fn: (prefix: PyValue) => {
+        if (!isString(prefix)) throw new TypeError('removeprefix() arg must be str', line, column);
+        return pyString(str.startsWith(prefix.value) ? str.slice(prefix.value.length) : str);
+      },
+    },
+    removesuffix: {
+      type: 'builtin',
+      name: 'str.removesuffix',
+      fn: (suffix: PyValue) => {
+        if (!isString(suffix)) throw new TypeError('removesuffix() arg must be str', line, column);
+        return pyString(suffix.value && str.endsWith(suffix.value) ? str.slice(0, -suffix.value.length) : str);
+      },
+    },
     format: {
       type: 'builtin',
       name: 'str.format',
@@ -514,6 +609,21 @@ export function getDictMethod(obj: PyValue & { type: 'dict' }, attr: string, lin
           throw new TypeError(`'${other.type}' object is not a mapping`, line, column);
         }
         return pyNone();
+      },
+    },
+    popitem: {
+      type: 'builtin',
+      name: 'dict.popitem',
+      fn: () => {
+        if (dict.size === 0) throw new KeyError('popitem(): dictionary is empty', line, column);
+        const keys = Array.from(dict.keys());
+        const lastKey = keys[keys.length - 1];
+        const val = dict.get(lastKey)!;
+        dict.delete(lastKey);
+        const keyVal = typeof lastKey === 'string' ? pyString(lastKey) :
+                       typeof lastKey === 'number' ? pyNumber(lastKey) :
+                       pyBoolean(lastKey);
+        return pyList([keyVal, val]);
       },
     },
     clear: {
