@@ -2005,3 +2005,23 @@ f(1, *[2, 3], 4)
 `)).toBe(10);
   });
 });
+
+// ─── Starred assignment ─────────────────────────────────────────────────────
+
+describe('starred assignment', () => {
+  test('a, *b = [1, 2, 3]', async () => {
+    expect(await runPython('a, *b = [1, 2, 3]\nb')).toEqual([2, 3]);
+  });
+
+  test('*a, b = [1, 2, 3]', async () => {
+    expect(await runPython('*a, b = [1, 2, 3]\na')).toEqual([1, 2]);
+  });
+
+  test('a, *b, c = [1, 2, 3, 4, 5]', async () => {
+    const interp = createInterpreter({ onPrint: () => {} });
+    await interp.run('a, *b, c = [1, 2, 3, 4, 5]');
+    expect(await interp.run('a')).toBe(1);
+    expect(await interp.run('b')).toEqual([2, 3, 4]);
+    expect(await interp.run('c')).toBe(5);
+  });
+});

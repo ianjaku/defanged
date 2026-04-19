@@ -235,7 +235,12 @@ export class Parser {
    */
   private parseSingleTarget(): Expression {
     const token = this.peek();
-    
+
+    if (this.match(TokenType.STAR)) {
+      const inner = this.primary();
+      return { type: 'Starred', value: inner, line: token.line, column: token.column };
+    }
+
     if (this.match(TokenType.LPAREN)) {
       // Parenthesized tuple
       const elements: Expression[] = [];
@@ -599,15 +604,24 @@ export class Parser {
     };
   }
 
+  private maybeStarredExpression(): Expression {
+    if (this.match(TokenType.STAR)) {
+      const token = this.previous();
+      const inner = this.expression();
+      return { type: 'Starred', value: inner, line: token.line, column: token.column };
+    }
+    return this.expression();
+  }
+
   private assignmentOrExpression(): Statement {
-    const expr = this.expression();
+    const expr = this.maybeStarredExpression();
 
     // Check for comma (potential tuple unpacking or implicit tuple expression)
     if (this.check(TokenType.COMMA) && !this.isAtEnd()) {
       const elements: Expression[] = [expr];
       while (this.match(TokenType.COMMA)) {
         if (this.check(TokenType.ASSIGN) || this.check(TokenType.NEWLINE) || this.isAtEnd()) break;
-        elements.push(this.expression());
+        elements.push(this.maybeStarredExpression());
       }
 
       // Tuple unpacking assignment: a, b = 1, 2

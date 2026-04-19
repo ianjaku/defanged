@@ -380,10 +380,8 @@ export class Interpreter {
         break;
 
       case 'Tuple': {
-        // Tuple unpacking: a, b = (1, 2) or for a, b in items
         const elements = target.elements;
-        
-        // Get iterable items from value
+
         let items: PyValue[];
         if (isList(value) || isTuple(value)) {
           items = value.elements;
@@ -396,18 +394,37 @@ export class Interpreter {
             target.column
           );
         }
-        
-        if (items.length !== elements.length) {
-          throw new TypeError(
-            `not enough values to unpack (expected ${elements.length}, got ${items.length})`,
-            target.line,
-            target.column
-          );
-        }
-        
-        // Recursively assign each element
-        for (let i = 0; i < elements.length; i++) {
-          await this.assignTarget(elements[i], items[i], env);
+
+        const starIdx = elements.findIndex(e => e.type === 'Starred');
+        if (starIdx >= 0) {
+          const before = elements.slice(0, starIdx);
+          const after = elements.slice(starIdx + 1);
+          const minRequired = before.length + after.length;
+          if (items.length < minRequired) {
+            throw new TypeError(
+              `not enough values to unpack (expected at least ${minRequired}, got ${items.length})`,
+              target.line, target.column
+            );
+          }
+          for (let i = 0; i < before.length; i++) {
+            await this.assignTarget(before[i], items[i], env);
+          }
+          const starItems = items.slice(before.length, items.length - after.length);
+          await this.assignTarget((elements[starIdx] as any).value, pyList(starItems), env);
+          for (let i = 0; i < after.length; i++) {
+            await this.assignTarget(after[i], items[items.length - after.length + i], env);
+          }
+        } else {
+          if (items.length !== elements.length) {
+            throw new TypeError(
+              `not enough values to unpack (expected ${elements.length}, got ${items.length})`,
+              target.line,
+              target.column
+            );
+          }
+          for (let i = 0; i < elements.length; i++) {
+            await this.assignTarget(elements[i], items[i], env);
+          }
         }
         break;
       }

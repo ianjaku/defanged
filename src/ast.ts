@@ -167,6 +167,11 @@ export interface NamedExpr extends ASTNode {
   value: Expression;
 }
 
+export interface Starred extends ASTNode {
+  type: 'Starred';
+  value: Expression;
+}
+
 export type Expression =
   | NumberLiteral
   | StringLiteral
@@ -191,7 +196,8 @@ export type Expression =
   | Ternary
   | Lambda
   | FString
-  | NamedExpr;
+  | NamedExpr
+  | Starred;
 
 // ============ Statements ============
 
