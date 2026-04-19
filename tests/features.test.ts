@@ -2323,3 +2323,31 @@ list(gen())
     expect(await runPython(code)).toEqual([1, 2]);
   });
 });
+
+// ─── dict.fromkeys ─────────────────────────────────────────────────────────────
+
+describe('dict.fromkeys', () => {
+  test('fromkeys with default None', async () => {
+    expect(await runPython(`dict.fromkeys(["a", "b", "c"])`)).toEqual({ a: null, b: null, c: null });
+  });
+
+  test('fromkeys with explicit value', async () => {
+    expect(await runPython(`dict.fromkeys(["x", "y"], 0)`)).toEqual({ x: 0, y: 0 });
+  });
+
+  test('fromkeys with tuple keys', async () => {
+    expect(await runPython(`dict.fromkeys(("a", "b"), True)`)).toEqual({ a: true, b: true });
+  });
+
+  test('fromkeys with range', async () => {
+    expect(await runPython(`dict.fromkeys(range(3), "val")`)).toEqual({ 0: "val", 1: "val", 2: "val" });
+  });
+
+  test('fromkeys with string (iterates chars)', async () => {
+    expect(await runPython(`dict.fromkeys("abc", 1)`)).toEqual({ a: 1, b: 1, c: 1 });
+  });
+
+  test('fromkeys deduplicates keys', async () => {
+    expect(await runPython(`dict.fromkeys([1, 2, 2, 3])`)).toEqual({ 1: null, 2: null, 3: null });
+  });
+});

@@ -1,6 +1,6 @@
 # tespy-parser: Feature Support Matrix
 
-A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**630 pass / 0 fail** as of 2026-04-19).
+A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**644 pass / 0 fail** as of 2026-04-19).
 
 Explanations are written for TypeScript developers who may not know Python.
 
@@ -130,6 +130,7 @@ d.items()              # Object.entries(d)
 d.update({"c": 3})     # Object.assign(d, {c: 3})
 d.pop("a")             # remove and return
 d.setdefault("x", 0)   # get, or set-and-return default
+dict.fromkeys(["a","b"], 0) # {"a": 0, "b": 0} — static constructor
 "a" in d               # d.hasOwnProperty("a")
 ```
 Dict comprehensions (`{k: v for k, v in items}`) also work.

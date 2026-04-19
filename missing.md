@@ -65,7 +65,7 @@ Tested against the current codebase on 2026-04-19. Items marked ✅ have been fi
 ## Missing dict methods
 
 47. ✅ ~~`dict.popitem()`~~
-48. **`dict.fromkeys()`** — static method not supported
+48. ✅ ~~`dict.fromkeys()`~~
 
 ## Semantic / runtime bugs
 

@@ -1718,6 +1718,35 @@ export class Interpreter {
     if (isList(obj)) return getListMethod(obj, attr, line, column);
     if (isDict(obj)) return getDictMethod(obj, attr, line, column);
     if (isSet(obj)) return getSetMethod(obj, attr, line, column);
+
+    if (obj.type === 'builtin' && obj.name === 'dict' && attr === 'fromkeys') {
+      return {
+        type: 'builtin',
+        name: 'dict.fromkeys',
+        fn: (keys: PyValue, value?: PyValue) => {
+          const defaultVal = value ?? pyNone();
+          let items: PyValue[];
+          if (isList(keys) || isTuple(keys)) {
+            items = keys.elements;
+          } else if (keys.type === 'iterator') {
+            items = keys.values;
+          } else if (isString(keys)) {
+            items = keys.value.split('').map((c: string) => pyString(c));
+          } else {
+            throw new TypeError(`'${keys.type}' object is not iterable`, line, column);
+          }
+          const entries = new Map<string | number | boolean, PyValue>();
+          for (const item of items) {
+            if (!isString(item) && !isNumber(item) && !isBoolean(item)) {
+              throw new TypeError('unhashable type', line, column);
+            }
+            entries.set(item.value, defaultVal);
+          }
+          return pyDict(entries);
+        },
+      };
+    }
+
     throw new TypeError(`'${obj.type}' object has no attribute '${attr}'`, line, column);
   }
 
