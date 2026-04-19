@@ -1901,3 +1901,20 @@ describe('dict.popitem', () => {
     await expect(runPython('{}.popitem()')).rejects.toThrow();
   });
 });
+
+// ─── % string formatting ────────────────────────────────────────────────────
+
+describe('% string formatting', () => {
+  test('basic %s and %d', async () => {
+    expect(await runPython('"%s is %d" % ("age", 25)')).toBe("age is 25");
+  });
+
+  test('single value (not tuple)', async () => {
+    expect(await runPython('"hello %s" % "world"')).toBe("hello world");
+  });
+
+  test('%x and %o', async () => {
+    expect(await runPython('"%x" % 255')).toBe("ff");
+    expect(await runPython('"%o" % 8')).toBe("10");
+  });
+});

@@ -35,6 +35,7 @@ import {
   isTruthy,
   pyEquals,
   pyStr,
+  pyRepr,
   jsToValue,
   valueToJs,
 } from './values';
@@ -812,6 +813,29 @@ export class Interpreter {
     // String concatenation
     if (op === '+' && isString(left) && isString(right)) {
       return pyString(left.value + right.value);
+    }
+
+    // String formatting with %
+    if (op === '%' && isString(left)) {
+      const values: PyValue[] = isTuple(right) ? right.elements : [right];
+      let i = 0;
+      const result = left.value.replace(/%([+-]?\d*\.?\d*[sdifr%oxXe])/g, (match, spec) => {
+        if (spec === '%') return '%';
+        const val = values[i++];
+        const typeChar = spec[spec.length - 1];
+        switch (typeChar) {
+          case 's': return pyStr(val);
+          case 'r': return pyRepr(val);
+          case 'd': case 'i': return String(Math.trunc(isNumber(val) ? val.value : 0));
+          case 'f': return (isNumber(val) ? val.value : 0).toFixed(spec.match(/\.(\d+)/)?.[1] ? parseInt(spec.match(/\.(\d+)/)![1]) : 6);
+          case 'o': return Math.trunc(isNumber(val) ? val.value : 0).toString(8);
+          case 'x': return Math.trunc(isNumber(val) ? val.value : 0).toString(16);
+          case 'X': return Math.trunc(isNumber(val) ? val.value : 0).toString(16).toUpperCase();
+          case 'e': return (isNumber(val) ? val.value : 0).toExponential(spec.match(/\.(\d+)/)?.[1] ? parseInt(spec.match(/\.(\d+)/)![1]) : 6);
+          default: return match;
+        }
+      });
+      return pyString(result);
     }
 
     // String repetition
