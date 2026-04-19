@@ -1835,3 +1835,23 @@ describe('sorting improvements', () => {
     expect(await runPython('x = ["banana", "pie", "a"]\nx.sort(key=lambda s: len(s))\nx')).toEqual(["a", "pie", "banana"]);
   });
 });
+
+// ─── Banker's rounding ──────────────────────────────────────────────────────
+
+describe("round() banker's rounding", () => {
+  test('round(0.5) → 0', async () => {
+    expect(await runPython('round(0.5)')).toBe(0);
+  });
+
+  test('round(1.5) → 2', async () => {
+    expect(await runPython('round(1.5)')).toBe(2);
+  });
+
+  test('round(2.5) → 2', async () => {
+    expect(await runPython('round(2.5)')).toBe(2);
+  });
+
+  test('round(3.5) → 4', async () => {
+    expect(await runPython('round(3.5)')).toBe(4);
+  });
+});

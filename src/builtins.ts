@@ -538,7 +538,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
     },
   });
 
-  // round(x, ndigits=0) - Round a number
+  // round(x, ndigits=0) - Banker's rounding (round half to even)
   builtins.set('round', {
     type: 'builtin',
     name: 'round',
@@ -548,7 +548,16 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
       }
       const digits = ndigits && isNumber(ndigits) ? ndigits.value : 0;
       const factor = Math.pow(10, digits);
-      return pyNumber(Math.round(x.value * factor) / factor);
+      const scaled = x.value * factor;
+      const floored = Math.floor(scaled);
+      const diff = scaled - floored;
+      let rounded: number;
+      if (Math.abs(diff - 0.5) < 1e-9) {
+        rounded = floored % 2 === 0 ? floored : floored + 1;
+      } else {
+        rounded = Math.round(scaled);
+      }
+      return pyNumber(rounded / factor);
     },
   });
 
