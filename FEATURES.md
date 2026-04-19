@@ -1,6 +1,6 @@
 # tespy-parser: Feature Support Matrix
 
-A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**644 pass / 0 fail** as of 2026-04-19).
+A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**649 pass / 0 fail** as of 2026-04-19).
 
 Explanations are written for TypeScript developers who may not know Python.
 
@@ -65,6 +65,12 @@ Note the shared-reference caveat with mutable values: `a = b = []` means `a` and
 | `s.format(...)` | Named/positional placeholder substitution | template literals |
 | `s.isupper()` / `s.islower()` | Case check predicates | no direct equivalent |
 | `s.istitle()` | True if titlecased | no direct equivalent |
+| `s.isnumeric()` | True if all numeric (incl. Unicode) | no direct equivalent |
+| `s.isdecimal()` | True if all decimal digits | no direct equivalent |
+| `s.isidentifier()` | True if valid Python identifier | no direct equivalent |
+| `s.isprintable()` | True if all printable (empty is True) | no direct equivalent |
+| `str.maketrans(x, y, z)` | Build translation table | no direct equivalent |
+| `s.translate(table)` | Apply translation table | no direct equivalent |
 | `s.partition(sep)` / `s.rpartition(sep)` | Split into 3-tuple at first/last sep | no direct equivalent |
 | `s.splitlines()` | Split on line boundaries | `s.split(/\r\n\|\r\|\n/)` |
 | `s.expandtabs(n)` | Replace tabs with spaces | no direct equivalent |

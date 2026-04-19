@@ -1888,6 +1888,44 @@ describe('additional string methods', () => {
   test('expandtabs', async () => {
     expect(await runPython('"01\\t012\\t0123\\t01234".expandtabs()')).toBe("01      012     0123    01234");
   });
+
+  test('isnumeric', async () => {
+    expect(await runPython('"123".isnumeric()')).toBe(true);
+    expect(await runPython('"abc".isnumeric()')).toBe(false);
+    expect(await runPython('"".isnumeric()')).toBe(false);
+    expect(await runPython('"12.3".isnumeric()')).toBe(false);
+  });
+
+  test('isdecimal', async () => {
+    expect(await runPython('"123".isdecimal()')).toBe(true);
+    expect(await runPython('"abc".isdecimal()')).toBe(false);
+    expect(await runPython('"".isdecimal()')).toBe(false);
+  });
+
+  test('isidentifier', async () => {
+    expect(await runPython('"hello".isidentifier()')).toBe(true);
+    expect(await runPython('"_foo".isidentifier()')).toBe(true);
+    expect(await runPython('"3abc".isidentifier()')).toBe(false);
+    expect(await runPython('"".isidentifier()')).toBe(false);
+    expect(await runPython('"a b".isidentifier()')).toBe(false);
+    expect(await runPython('"class".isidentifier()')).toBe(true);
+  });
+
+  test('isprintable', async () => {
+    expect(await runPython('"hello".isprintable()')).toBe(true);
+    expect(await runPython('"".isprintable()')).toBe(true);
+  });
+
+  test('maketrans / translate', async () => {
+    expect(await runPython(`
+t = str.maketrans("abc", "xyz")
+"abcdef".translate(t)
+`)).toBe("xyzdef");
+    expect(await runPython(`
+t = str.maketrans("", "", "aeiou")
+"hello world".translate(t)
+`)).toBe("hll wrld");
+  });
 });
 
 // ─── dict.popitem ───────────────────────────────────────────────────────────

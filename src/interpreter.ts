@@ -1955,6 +1955,35 @@ export class Interpreter {
     if (isList(obj)) return getListMethod(obj, attr, line, column);
     if (isDict(obj)) return getDictMethod(obj, attr, line, column);
     if (isSet(obj)) return getSetMethod(obj, attr, line, column);
+    if (obj.type === 'builtin' && obj.name === 'str' && attr === 'maketrans') {
+      return {
+        type: 'builtin', name: 'str.maketrans',
+        fn: (x: PyValue, y?: PyValue, z?: PyValue) => {
+          const table = new Map<string | number | boolean, PyValue>();
+          if (isDict(x) && y === undefined) {
+            for (const [k, v] of x.entries) {
+              const code = typeof k === 'string' ? k.codePointAt(0)! : k as number;
+              table.set(code, v);
+            }
+          } else if (isString(x) && y !== undefined && isString(y)) {
+            if (x.value.length !== y.value.length) {
+              throw new ValueError('the first two maketrans arguments must have equal length', line, column);
+            }
+            for (let i = 0; i < x.value.length; i++) {
+              table.set(x.value.codePointAt(i)!, pyString(y.value[i]));
+            }
+            if (z !== undefined && isString(z)) {
+              for (const ch of z.value) {
+                table.set(ch.codePointAt(0)!, pyNone());
+              }
+            }
+          } else {
+            throw new TypeError('maketrans() arguments must be str or dict', line, column);
+          }
+          return pyDict(table);
+        },
+      };
+    }
     if (obj.type === 'builtin' && obj.name === 'dict' && attr === 'fromkeys') {
       return {
         type: 'builtin', name: 'dict.fromkeys',

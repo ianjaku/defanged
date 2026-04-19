@@ -300,6 +300,48 @@ export function getStringMethod(obj: PyValue & { type: 'string' }, attr: string,
         return pyBoolean(str === titled && /[A-Z]/.test(str));
       },
     },
+    isnumeric: {
+      type: 'builtin',
+      name: 'str.isnumeric',
+      fn: () => pyBoolean(str.length > 0 && /^\p{N}+$/u.test(str)),
+    },
+    isdecimal: {
+      type: 'builtin',
+      name: 'str.isdecimal',
+      fn: () => pyBoolean(str.length > 0 && /^\p{Nd}+$/u.test(str)),
+    },
+    isidentifier: {
+      type: 'builtin',
+      name: 'str.isidentifier',
+      fn: () => pyBoolean(str.length > 0 && /^[a-zA-Z_]\w*$/.test(str)),
+    },
+    isprintable: {
+      type: 'builtin',
+      name: 'str.isprintable',
+      fn: () => pyBoolean(!/[\x00-\x1f\x7f-\x9f]/.test(str)),
+    },
+    translate: {
+      type: 'builtin',
+      name: 'str.translate',
+      fn: (table: PyValue) => {
+        if (!isDict(table)) throw new TypeError('translate() argument must be a dict', line, column);
+        let result = '';
+        for (const ch of str) {
+          const code = ch.codePointAt(0)!;
+          const mapped = table.entries.get(code);
+          if (mapped === undefined) {
+            result += ch;
+          } else if (isNone(mapped)) {
+            // delete character
+          } else if (isString(mapped)) {
+            result += mapped.value;
+          } else if (isNumber(mapped)) {
+            result += String.fromCodePoint(mapped.value);
+          }
+        }
+        return pyString(result);
+      },
+    },
     partition: {
       type: 'builtin',
       name: 'str.partition',

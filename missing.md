@@ -54,13 +54,13 @@ Tested against the current codebase on 2026-04-19. Items marked ✅ have been fi
 ## Missing string methods
 
 39. ✅ ~~`str.isupper()` / `str.islower()`~~
-40. **`str.isnumeric()` / `str.isdecimal()` / `str.isidentifier()` / `str.isprintable()`** — ✅ `str.istitle()` added
+40. ✅ ~~`str.isnumeric()` / `str.isdecimal()` / `str.isidentifier()` / `str.isprintable()`~~ — ✅ `str.istitle()` also added
 41. ✅ ~~`str.partition()` / `str.rpartition()`~~
 42. ✅ ~~`str.splitlines()`~~
 43. ✅ ~~`str.expandtabs()`~~
 44. ✅ ~~`str.removeprefix()` / `str.removesuffix()`~~
 45. **`str.encode()`** — intentionally unsupported (no bytes type)
-46. **`str.maketrans()` / `str.translate()`**
+46. ✅ ~~`str.maketrans()` / `str.translate()`~~
 
 ## Missing dict methods
 
