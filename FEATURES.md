@@ -1,6 +1,6 @@
 # tespy-parser: Feature Support Matrix
 
-A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**512 pass / 0 fail** as of 2026-04-17).
+A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**538 pass / 0 fail** as of 2026-04-18).
 
 Explanations are written for TypeScript developers who may not know Python.
 
@@ -9,6 +9,7 @@ Explanations are written for TypeScript developers who may not know Python.
 ## Table of Contents
 
 - [✅ Working Features](#-working-features)
+- [❌ Broken or Missing Features](#-broken-or-missing-features)
 - [TypeScript ↔ Python cheat sheet](#typescript--python-cheat-sheet)
 
 ---
@@ -131,7 +132,8 @@ Dict comprehensions (`{k: v for k, v in items}`) also work.
 - Definitions: `def f(a, b): ...`
 - Default arguments: `def f(a, b=10)`
 - Keyword arguments: `f(a=1, b=2)`
-- `*args` and `**kwargs` (variadic and rest-object)
+- `*args` (rest parameter): `def f(*args): return len(args)` — like `function f(...args)` in TS
+- `**kwargs` (keyword rest): `def f(**kwargs): return kwargs["key"]` — collects keyword args into a dict
 - Recursion, nested functions, closures
 - Lambdas: `lambda x: x * 2` — like `(x) => x * 2`
 - Early return with `return`
@@ -139,15 +141,17 @@ Dict comprehensions (`{k: v for k, v in items}`) also work.
 ### Control flow
 - `if / elif / else` — like `if / else if / else`
 - `for x in iterable:` — like `for (const x of iterable)`
+- `for...else` / `while...else` — the `else` clause runs if the loop completes without `break` (no TS equivalent)
 - `while`, `break`, `continue`
-- `for...else` and `while...else`: the `else` runs if the loop completed without `break` (Python-specific, no TS equivalent)
+- `raise` statement — `raise ValueError("x")` — like `throw new Error("x")` in TS
 - `try / except / finally` (Python's name for catch)
-- `raise` (Python's `throw`)
 - Chained comparisons: `1 < x < 10` (equivalent to `1 < x && x < 10`)
 - Short-circuit `and` / `or` (note: they return the operand, not a boolean — like `&&` / `||` in TS)
 
 ### Built-ins
-Working: `len`, `range`, `print`, `abs`, `min`, `max`, `sum`, `round`, `sorted` *(on lists, tuples, dicts, and strings)*, `reversed`, `enumerate`, `zip`, `map`, `filter`, `any`, `all`, `type`, `isinstance`, `hex`, `oct`, `bin`, `ord`, `chr`, `repr`.
+Working: `len`, `range`, `print`, `abs`, `min`, `max`, `sum`, `round`, `sorted` *(on lists, tuples, dicts, and strings)*, `reversed`, `enumerate`, `zip`, `map`, `filter`, `any`, `all`, `type`, `isinstance`, `repr`, `hex`, `oct`, `bin`, `ord`, `chr`.
+
+Exception constructors: `Exception`, `ValueError`, `TypeError`, `KeyError`, `IndexError`, `ZeroDivisionError`, `NameError`, `RuntimeError` — all work with `raise` and `except`.
 
 ### F-strings (most cases)
 ```python
@@ -170,15 +174,20 @@ Set comprehensions are like list comprehensions but produce a `set` (deduplicate
 ### Multiline strings
 Triple-quoted strings work: `"""multi\nline"""`.
 
-### Number formats
-- Hex: `0xff` → 255
-- Octal: `0o77` → 63
-- Binary: `0b1010` → 10
-- Underscore separators: `1_000_000` → 1000000
+### Number literal formats
+```python
+0xff          # hex → 255
+0o77          # octal → 63
+0b1010        # binary → 10
+1_000_000     # underscore separators → 1000000
+3.14_15       # underscores in floats too
+```
+Python supports hex (`0x`), octal (`0o`), and binary (`0b`) prefixes, plus underscore digit separators for readability. No direct TS equivalent for the underscore separators (TS uses `_` too, but only in numeric literals since ES2021).
 
 ### Scope and closures
 - Functions capture their enclosing scope (lexical scoping, same as TS).
-- `global` and `nonlocal` keywords work.
+- `global x` — declare that `x` in this function refers to the module-level variable
+- `nonlocal x` — declare that `x` refers to the enclosing function's variable (not global)
 
 ### F-strings with nested quotes
 ```python
@@ -211,6 +220,12 @@ In Python, `bool` inherits from `int` — `True` acts as `1` and `False` as `0` 
 sorted(['banana', 'apple'], key=lambda x: len(x))  # ['apple', 'banana']
 ```
 Lambdas with function calls in their bodies can be passed directly as keyword arguments (e.g., `key=`). No need to assign to a variable first.
+
+---
+
+## ❌ Known Missing Features
+
+See `missing.md` for a comprehensive list. Major gaps include: `class` definitions, `del`/`assert`/`with` statements, `yield`/generators, decorators, bitwise operators, `*`/`**` unpacking in calls, starred assignment, slice assignment, and several builtins (`pow`, `divmod`, `callable`, `iter`/`next`, `tuple()` constructor).
 
 ---
 

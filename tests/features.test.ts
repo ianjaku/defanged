@@ -1355,3 +1355,237 @@ result
     await expect(runPython('len(range(5))')).rejects.toThrow();
   });
 });
+
+// ─── raise statement ────────────────────────────────────────────────────────
+
+describe('raise statement', () => {
+  test('raise and catch ValueError', async () => {
+    expect(await runPython(`
+try:
+    raise ValueError("bad input")
+except ValueError as e:
+    result = str(e)
+result
+`)).toBe('bad input');
+  });
+
+  test('raise and catch generic Exception', async () => {
+    expect(await runPython(`
+try:
+    raise Exception("oops")
+except Exception as e:
+    result = str(e)
+result
+`)).toBe('oops');
+  });
+
+  test('uncaught raise propagates', async () => {
+    await expect(runPython('raise ValueError("nope")')).rejects.toThrow();
+  });
+
+  test('raise without argument (bare raise is not supported, but with arg is)', async () => {
+    expect(await runPython(`
+try:
+    raise TypeError("wrong type")
+except TypeError:
+    x = "caught"
+x
+`)).toBe('caught');
+  });
+});
+
+// ─── for...else / while...else ──────────────────────────────────────────────
+
+describe('Loop else clauses', () => {
+  test('for-else runs else when no break', async () => {
+    expect(await runPython(`
+result = "default"
+for x in [1, 2, 3]:
+    pass
+else:
+    result = "completed"
+result
+`)).toBe('completed');
+  });
+
+  test('for-else skips else on break', async () => {
+    expect(await runPython(`
+result = "default"
+for x in [1, 2, 3]:
+    if x == 2:
+        break
+else:
+    result = "completed"
+result
+`)).toBe('default');
+  });
+
+  test('while-else runs else when condition becomes false', async () => {
+    expect(await runPython(`
+i = 0
+result = "default"
+while i < 3:
+    i += 1
+else:
+    result = "done"
+result
+`)).toBe('done');
+  });
+
+  test('while-else skips else on break', async () => {
+    expect(await runPython(`
+i = 0
+result = "default"
+while i < 10:
+    i += 1
+    if i == 5:
+        break
+else:
+    result = "done"
+result
+`)).toBe('default');
+  });
+});
+
+// ─── global and nonlocal ────────────────────────────────────────────────────
+
+describe('global and nonlocal', () => {
+  test('global lets function modify module-level variable', async () => {
+    expect(await runPython(`
+x = 10
+def change():
+    global x
+    x = 20
+change()
+x
+`)).toBe(20);
+  });
+
+  test('nonlocal lets inner function modify enclosing variable', async () => {
+    expect(await runPython(`
+def outer():
+    x = 10
+    def inner():
+        nonlocal x
+        x = 20
+    inner()
+    return x
+outer()
+`)).toBe(20);
+  });
+
+  test('without global, assignment creates local', async () => {
+    expect(await runPython(`
+x = 10
+def f():
+    x = 99
+f()
+x
+`)).toBe(10);
+  });
+});
+
+// ─── *args and **kwargs ─────────────────────────────────────────────────────
+
+describe('*args and **kwargs', () => {
+  test('*args collects positional arguments', async () => {
+    expect(await runPython(`
+def f(*args):
+    return list(args)
+f(1, 2, 3)
+`)).toEqual([1, 2, 3]);
+  });
+
+  test('**kwargs collects keyword arguments', async () => {
+    expect(await runPython(`
+def f(**kwargs):
+    return kwargs
+f(a=1, b=2)
+`)).toEqual({ a: 1, b: 2 });
+  });
+
+  test('mixed regular and *args', async () => {
+    expect(await runPython(`
+def f(first, *rest):
+    return [first, list(rest)]
+f(1, 2, 3)
+`)).toEqual([1, [2, 3]]);
+  });
+
+  test('*args with sum', async () => {
+    expect(await runPython(`
+def total(*args):
+    return sum(args)
+total(1, 2, 3, 4)
+`)).toBe(10);
+  });
+});
+
+// ─── Number literal formats ─────────────────────────────────────────────────
+
+describe('Number literal formats', () => {
+  test('hex literal', async () => {
+    expect(await runPython('0xff')).toBe(255);
+    expect(await runPython('0xFF')).toBe(255);
+    expect(await runPython('0x10')).toBe(16);
+  });
+
+  test('octal literal', async () => {
+    expect(await runPython('0o77')).toBe(63);
+    expect(await runPython('0o10')).toBe(8);
+  });
+
+  test('binary literal', async () => {
+    expect(await runPython('0b1010')).toBe(10);
+    expect(await runPython('0b11111111')).toBe(255);
+  });
+
+  test('underscore separators', async () => {
+    expect(await runPython('1_000_000')).toBe(1000000);
+    expect(await runPython('1_000 + 2_000')).toBe(3000);
+  });
+});
+
+// ─── hex/oct/bin/ord/chr builtins ───────────────────────────────────────────
+
+describe('hex/oct/bin/ord/chr builtins', () => {
+  test('hex()', async () => {
+    expect(await runPython('hex(255)')).toBe('0xff');
+    expect(await runPython('hex(0)')).toBe('0x0');
+    expect(await runPython('hex(-42)')).toBe('-0x2a');
+  });
+
+  test('oct()', async () => {
+    expect(await runPython('oct(8)')).toBe('0o10');
+    expect(await runPython('oct(0)')).toBe('0o0');
+  });
+
+  test('bin()', async () => {
+    expect(await runPython('bin(10)')).toBe('0b1010');
+    expect(await runPython('bin(0)')).toBe('0b0');
+  });
+
+  test('ord()', async () => {
+    expect(await runPython('ord("A")')).toBe(65);
+    expect(await runPython('ord("a")')).toBe(97);
+    expect(await runPython('ord("0")')).toBe(48);
+  });
+
+  test('chr()', async () => {
+    expect(await runPython('chr(65)')).toBe('A');
+    expect(await runPython('chr(97)')).toBe('a');
+    expect(await runPython('chr(48)')).toBe('0');
+  });
+});
+
+// ─── str.format with named args ─────────────────────────────────────────────
+
+describe('str.format named placeholders', () => {
+  test('named placeholders', async () => {
+    expect(await runPython('"{name} is {age}".format(name="Alice", age=30)')).toBe('Alice is 30');
+  });
+
+  test('mixed positional and named', async () => {
+    expect(await runPython('"{0} is {age}".format("Alice", age=30)')).toBe('Alice is 30');
+  });
+});

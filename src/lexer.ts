@@ -161,15 +161,47 @@ export class Lexer {
     const startColumn = this.column;
     let numStr = '';
 
-    while (this.isDigit(this.peek())) {
-      numStr += this.advance();
+    // Check for 0x, 0o, 0b prefixes
+    if (this.peek() === '0' && (this.peekNext() === 'x' || this.peekNext() === 'X' ||
+                                 this.peekNext() === 'o' || this.peekNext() === 'O' ||
+                                 this.peekNext() === 'b' || this.peekNext() === 'B')) {
+      const prefix = this.peekNext().toLowerCase();
+      this.advance(); // consume '0'
+      this.advance(); // consume prefix char
+      let digits = '';
+      if (prefix === 'x') {
+        while (this.isHexDigit(this.peek()) || this.peek() === '_') {
+          if (this.peek() !== '_') digits += this.peek();
+          this.advance();
+        }
+        this.tokens.push({ type: TokenType.NUMBER, value: parseInt(digits, 16), line: this.line, column: startColumn });
+      } else if (prefix === 'o') {
+        while (this.isOctDigit(this.peek()) || this.peek() === '_') {
+          if (this.peek() !== '_') digits += this.peek();
+          this.advance();
+        }
+        this.tokens.push({ type: TokenType.NUMBER, value: parseInt(digits, 8), line: this.line, column: startColumn });
+      } else {
+        while (this.peek() === '0' || this.peek() === '1' || this.peek() === '_') {
+          if (this.peek() !== '_') digits += this.peek();
+          this.advance();
+        }
+        this.tokens.push({ type: TokenType.NUMBER, value: parseInt(digits, 2), line: this.line, column: startColumn });
+      }
+      return;
+    }
+
+    while (this.isDigit(this.peek()) || this.peek() === '_') {
+      if (this.peek() !== '_') numStr += this.peek();
+      this.advance();
     }
 
     // Check for float
     if (this.peek() === '.' && this.isDigit(this.peekNext())) {
       numStr += this.advance(); // consume '.'
-      while (this.isDigit(this.peek())) {
-        numStr += this.advance();
+      while (this.isDigit(this.peek()) || this.peek() === '_') {
+        if (this.peek() !== '_') numStr += this.peek();
+        this.advance();
       }
     }
 
@@ -603,6 +635,16 @@ export class Lexer {
     return (char >= 'a' && char <= 'z') ||
            (char >= 'A' && char <= 'Z') ||
            char === '_';
+  }
+
+  private isHexDigit(char: string): boolean {
+    return (char >= '0' && char <= '9') ||
+           (char >= 'a' && char <= 'f') ||
+           (char >= 'A' && char <= 'F');
+  }
+
+  private isOctDigit(char: string): boolean {
+    return char >= '0' && char <= '7';
   }
 
   private isAlphaNumeric(char: string): boolean {

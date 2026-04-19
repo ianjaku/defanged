@@ -76,6 +76,9 @@ export class Parser {
     if (this.check(TokenType.CONTINUE)) return this.continueStatement();
     if (this.check(TokenType.PASS)) return this.passStatement();
     if (this.check(TokenType.TRY)) return this.tryStatement();
+    if (this.check(TokenType.RAISE)) return this.raiseStatement();
+    if (this.check(TokenType.GLOBAL)) return this.globalStatement();
+    if (this.check(TokenType.NONLOCAL)) return this.nonlocalStatement();
 
     return this.assignmentOrExpression();
   }
@@ -171,11 +174,19 @@ export class Parser {
     this.consume(TokenType.COLON, "Expected ':' after for iterable");
     const body = this.block();
 
+    let orelse: Statement[] = [];
+    if (this.check(TokenType.ELSE)) {
+      this.advance();
+      this.consume(TokenType.COLON, "Expected ':' after else");
+      orelse = this.block();
+    }
+
     return {
       type: 'For',
       target,
       iter,
       body,
+      orelse,
       line: token.line,
       column: token.column,
     };
@@ -254,10 +265,18 @@ export class Parser {
     this.consume(TokenType.COLON, "Expected ':' after while condition");
     const body = this.block();
 
+    let orelse: Statement[] = [];
+    if (this.check(TokenType.ELSE)) {
+      this.advance();
+      this.consume(TokenType.COLON, "Expected ':' after else");
+      orelse = this.block();
+    }
+
     return {
       type: 'While',
       test,
       body,
+      orelse,
       line: token.line,
       column: token.column,
     };
@@ -269,7 +288,7 @@ export class Parser {
     const name = nameToken.value as string;
 
     this.consume(TokenType.LPAREN, "Expected '(' after function name");
-    const params = this.parameters();
+    const { params, restParam, kwargsParam } = this.parameters();
     this.consume(TokenType.RPAREN, "Expected ')' after parameters");
     this.consume(TokenType.COLON, "Expected ':' after function signature");
     const body = this.block();
@@ -278,30 +297,41 @@ export class Parser {
       type: 'FunctionDef',
       name,
       params,
+      restParam,
+      kwargsParam,
       body,
       line: token.line,
       column: token.column,
     };
   }
 
-  private parameters(): Parameter[] {
+  private parameters(): { params: Parameter[]; restParam?: string; kwargsParam?: string } {
     const params: Parameter[] = [];
+    let restParam: string | undefined;
+    let kwargsParam: string | undefined;
 
     if (!this.check(TokenType.RPAREN)) {
       do {
-        const nameToken = this.consume(TokenType.IDENTIFIER, "Expected parameter name");
-        const param: Parameter = { name: nameToken.value as string };
+        if (this.match(TokenType.DOUBLE_STAR)) {
+          const nameToken = this.consume(TokenType.IDENTIFIER, "Expected parameter name after **");
+          kwargsParam = nameToken.value as string;
+        } else if (this.match(TokenType.STAR)) {
+          const nameToken = this.consume(TokenType.IDENTIFIER, "Expected parameter name after *");
+          restParam = nameToken.value as string;
+        } else {
+          const nameToken = this.consume(TokenType.IDENTIFIER, "Expected parameter name");
+          const param: Parameter = { name: nameToken.value as string };
 
-        // Check for default value
-        if (this.match(TokenType.ASSIGN)) {
-          param.default = this.expression();
+          if (this.match(TokenType.ASSIGN)) {
+            param.default = this.expression();
+          }
+
+          params.push(param);
         }
-
-        params.push(param);
       } while (this.match(TokenType.COMMA));
     }
 
-    return params;
+    return { params, restParam, kwargsParam };
   }
 
   private returnStatement(): Statement {
@@ -362,6 +392,57 @@ export class Parser {
     this.consumeNewline();
     return {
       type: 'Pass',
+      line: token.line,
+      column: token.column,
+    };
+  }
+
+  private raiseStatement(): Statement {
+    const token = this.consume(TokenType.RAISE, "Expected 'raise'");
+    let value: Expression | null = null;
+    if (!this.check(TokenType.NEWLINE) && !this.isAtEnd()) {
+      value = this.expression();
+    }
+    this.consumeNewline();
+    return {
+      type: 'Raise',
+      value,
+      line: token.line,
+      column: token.column,
+    };
+  }
+
+  private globalStatement(): Statement {
+    const token = this.consume(TokenType.GLOBAL, "Expected 'global'");
+    const names: string[] = [];
+    const first = this.consume(TokenType.IDENTIFIER, "Expected variable name after 'global'");
+    names.push(first.value as string);
+    while (this.match(TokenType.COMMA)) {
+      const next = this.consume(TokenType.IDENTIFIER, "Expected variable name");
+      names.push(next.value as string);
+    }
+    this.consumeNewline();
+    return {
+      type: 'Global',
+      names,
+      line: token.line,
+      column: token.column,
+    };
+  }
+
+  private nonlocalStatement(): Statement {
+    const token = this.consume(TokenType.NONLOCAL, "Expected 'nonlocal'");
+    const names: string[] = [];
+    const first = this.consume(TokenType.IDENTIFIER, "Expected variable name after 'nonlocal'");
+    names.push(first.value as string);
+    while (this.match(TokenType.COMMA)) {
+      const next = this.consume(TokenType.IDENTIFIER, "Expected variable name");
+      names.push(next.value as string);
+    }
+    this.consumeNewline();
+    return {
+      type: 'Nonlocal',
+      names,
       line: token.line,
       column: token.column,
     };

@@ -61,6 +61,8 @@ export interface PyFunction {
   type: 'function';
   name: string;
   params: Parameter[];
+  restParam?: string;
+  kwargsParam?: string;
   body: Statement[];
   closure: Environment;
 }
@@ -92,12 +94,17 @@ export interface PyIterator {
 export class Environment {
   private variables: Map<string, PyValue> = new Map();
   private parent?: Environment;
+  private globalNames: Set<string> = new Set();
+  private nonlocalNames: Set<string> = new Set();
 
   constructor(parent?: Environment) {
     this.parent = parent;
   }
 
   get(name: string): PyValue | undefined {
+    if (this.globalNames.has(name)) {
+      return this.getGlobal()?.variables.get(name);
+    }
     const value = this.variables.get(name);
     if (value !== undefined) return value;
     if (this.parent) return this.parent.get(name);
@@ -105,8 +112,24 @@ export class Environment {
   }
 
   set(name: string, value: PyValue): void {
-    // Always set in current scope
+    if (this.globalNames.has(name)) {
+      const global = this.getGlobal();
+      if (global) global.variables.set(name, value);
+      return;
+    }
+    if (this.nonlocalNames.has(name)) {
+      this.setInParent(name, value);
+      return;
+    }
     this.variables.set(name, value);
+  }
+
+  declareGlobal(name: string): void {
+    this.globalNames.add(name);
+  }
+
+  declareNonlocal(name: string): void {
+    this.nonlocalNames.add(name);
   }
 
   has(name: string): boolean {
@@ -115,7 +138,22 @@ export class Environment {
     return false;
   }
 
-  // For debugging
+  private getGlobal(): Environment {
+    let env: Environment = this;
+    while (env.parent) env = env.parent;
+    return env;
+  }
+
+  private setInParent(name: string, value: PyValue): void {
+    if (this.parent) {
+      if (this.parent.variables.has(name) || !this.parent.parent) {
+        this.parent.variables.set(name, value);
+      } else {
+        this.parent.setInParent(name, value);
+      }
+    }
+  }
+
   dump(): Record<string, PyValue> {
     const result: Record<string, PyValue> = {};
     for (const [key, value] of this.variables) {

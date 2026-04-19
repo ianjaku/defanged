@@ -572,6 +572,61 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
     },
   });
 
+  // hex(x) - Convert integer to hex string
+  builtins.set('hex', {
+    type: 'builtin',
+    name: 'hex',
+    fn: (x: PyValue): PyValue => {
+      if (!isNumber(x)) throw new TypeError(`'${x.type}' object cannot be interpreted as an integer`, 0, 0);
+      const n = Math.trunc(x.value);
+      return pyString(n < 0 ? '-0x' + (-n).toString(16) : '0x' + n.toString(16));
+    },
+  });
+
+  // oct(x) - Convert integer to octal string
+  builtins.set('oct', {
+    type: 'builtin',
+    name: 'oct',
+    fn: (x: PyValue): PyValue => {
+      if (!isNumber(x)) throw new TypeError(`'${x.type}' object cannot be interpreted as an integer`, 0, 0);
+      const n = Math.trunc(x.value);
+      return pyString(n < 0 ? '-0o' + (-n).toString(8) : '0o' + n.toString(8));
+    },
+  });
+
+  // bin(x) - Convert integer to binary string
+  builtins.set('bin', {
+    type: 'builtin',
+    name: 'bin',
+    fn: (x: PyValue): PyValue => {
+      if (!isNumber(x)) throw new TypeError(`'${x.type}' object cannot be interpreted as an integer`, 0, 0);
+      const n = Math.trunc(x.value);
+      return pyString(n < 0 ? '-0b' + (-n).toString(2) : '0b' + n.toString(2));
+    },
+  });
+
+  // ord(c) - Return Unicode code point of character
+  builtins.set('ord', {
+    type: 'builtin',
+    name: 'ord',
+    fn: (c: PyValue): PyValue => {
+      if (!isString(c) || c.value.length !== 1) {
+        throw new TypeError('ord() expected a character, but string of length ' + (isString(c) ? c.value.length : 0) + ' found', 0, 0);
+      }
+      return pyNumber(c.value.charCodeAt(0));
+    },
+  });
+
+  // chr(i) - Return character from Unicode code point
+  builtins.set('chr', {
+    type: 'builtin',
+    name: 'chr',
+    fn: (i: PyValue): PyValue => {
+      if (!isNumber(i)) throw new TypeError(`an integer is required`, 0, 0);
+      return pyString(String.fromCharCode(Math.trunc(i.value)));
+    },
+  });
+
   // repr(obj) - Return string representation
   builtins.set('repr', {
     type: 'builtin',
@@ -838,6 +893,21 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
       return pyNone();
     },
   });
+
+  // Exception constructors — return a tagged value that `raise` can inspect
+  for (const name of ['Exception', 'ValueError', 'TypeError', 'KeyError', 'IndexError', 'ZeroDivisionError', 'NameError', 'RuntimeError']) {
+    builtins.set(name, {
+      type: 'builtin',
+      name,
+      fn: (msg?: PyValue): PyValue => {
+        const message = msg ? (isString(msg) ? msg.value : String((msg as any).value ?? '')) : '';
+        const val = pyString(message);
+        (val as any).exceptionName = name;
+        (val as any).exceptionMessage = message;
+        return val;
+      },
+    });
+  }
 
   return builtins;
 }

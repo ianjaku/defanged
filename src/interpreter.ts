@@ -184,31 +184,39 @@ export class Interpreter {
         const items = this.getIterableItems(iter, stmt.line, stmt.column);
 
         let result: PyValue = pyNone();
+        let didBreak = false;
         for (const item of items) {
           this.checkIterations(stmt.line, stmt.column);
           await this.assignTarget(stmt.target, item, env);
           try {
             result = await this.executeBlock(stmt.body, env);
           } catch (e) {
-            if (e instanceof BreakException) break;
+            if (e instanceof BreakException) { didBreak = true; break; }
             if (e instanceof ContinueException) continue;
             throw e;
           }
+        }
+        if (!didBreak && stmt.orelse.length > 0) {
+          result = await this.executeBlock(stmt.orelse, env);
         }
         return result;
       }
 
       case 'While': {
         let result: PyValue = pyNone();
+        let didBreak = false;
         while (isTruthy(await this.evaluate(stmt.test, env))) {
           this.checkIterations(stmt.line, stmt.column);
           try {
             result = await this.executeBlock(stmt.body, env);
           } catch (e) {
-            if (e instanceof BreakException) break;
+            if (e instanceof BreakException) { didBreak = true; break; }
             if (e instanceof ContinueException) continue;
             throw e;
           }
+        }
+        if (!didBreak && stmt.orelse.length > 0) {
+          result = await this.executeBlock(stmt.orelse, env);
         }
         return result;
       }
@@ -218,6 +226,8 @@ export class Interpreter {
           type: 'function',
           name: stmt.name,
           params: stmt.params,
+          restParam: stmt.restParam,
+          kwargsParam: stmt.kwargsParam,
           body: stmt.body,
           closure: env,
         };
@@ -238,6 +248,41 @@ export class Interpreter {
 
       case 'Pass':
         return pyNone();
+
+      case 'Raise': {
+        if (stmt.value) {
+          const value = await this.evaluate(stmt.value, env);
+          const exName = (value as any).exceptionName;
+          const msg = (value as any).exceptionMessage ?? pyStr(value);
+          if (exName) {
+            switch (exName) {
+              case 'ValueError': throw new ValueError(msg, stmt.line, stmt.column);
+              case 'TypeError': throw new TypeError(msg, stmt.line, stmt.column);
+              case 'KeyError': throw new KeyError(msg, stmt.line, stmt.column);
+              case 'IndexError': throw new IndexError(msg, stmt.line, stmt.column);
+              case 'ZeroDivisionError': throw new ZeroDivisionError(stmt.line, stmt.column);
+              case 'NameError': throw new NameError(msg, stmt.line, stmt.column);
+              default: throw new InterpreterError(msg, stmt.line, stmt.column);
+            }
+          }
+          throw new InterpreterError(msg, stmt.line, stmt.column);
+        }
+        throw new InterpreterError('No active exception to re-raise', stmt.line, stmt.column);
+      }
+
+      case 'Global': {
+        for (const name of stmt.names) {
+          env.declareGlobal(name);
+        }
+        return pyNone();
+      }
+
+      case 'Nonlocal': {
+        for (const name of stmt.names) {
+          env.declareNonlocal(name);
+        }
+        return pyNone();
+      }
 
       case 'Try': {
         let result: PyValue = pyNone();
@@ -901,13 +946,15 @@ export class Interpreter {
     if (func.type === 'function') {
       const funcEnv = new Environment(func.closure);
 
-      // Bind parameters
+      // Bind regular parameters
+      const usedKwargs = new Set<string>();
       for (let i = 0; i < func.params.length; i++) {
         const param = func.params[i];
         let value: PyValue;
 
         if (kwargs[param.name] !== undefined) {
           value = kwargs[param.name];
+          usedKwargs.add(param.name);
         } else if (i < args.length) {
           value = args[i];
         } else if (param.default !== undefined) {
@@ -921,6 +968,23 @@ export class Interpreter {
         }
 
         funcEnv.set(param.name, value);
+      }
+
+      // Bind *args
+      if (func.restParam) {
+        const restArgs = args.slice(func.params.length);
+        funcEnv.set(func.restParam, pyTuple(restArgs));
+      }
+
+      // Bind **kwargs
+      if (func.kwargsParam) {
+        const entries = new Map<string | number | boolean, PyValue>();
+        for (const [k, v] of Object.entries(kwargs)) {
+          if (!usedKwargs.has(k)) {
+            entries.set(k, v);
+          }
+        }
+        funcEnv.set(func.kwargsParam, pyDict(entries));
       }
 
       try {
@@ -1277,7 +1341,7 @@ export class Interpreter {
     
     // Map our error types to Python exception names
     const errorTypeMap: Record<string, string[]> = {
-      'Exception': ['TypeError', 'NameError', 'KeyError', 'IndexError', 'ZeroDivisionError', 'ValueError', 'SyntaxError', 'AttributeError'],
+      'Exception': ['TypeError', 'NameError', 'KeyError', 'IndexError', 'ZeroDivisionError', 'ValueError', 'SyntaxError', 'AttributeError', 'InterpreterError'],
       'TypeError': ['TypeError'],
       'NameError': ['NameError'],
       'KeyError': ['KeyError'],

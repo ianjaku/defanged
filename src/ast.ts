@@ -223,24 +223,43 @@ export interface For extends ASTNode {
   target: Expression;
   iter: Expression;
   body: Statement[];
+  orelse: Statement[];
 }
 
 export interface While extends ASTNode {
   type: 'While';
   test: Expression;
   body: Statement[];
+  orelse: Statement[];
 }
 
 export interface FunctionDef extends ASTNode {
   type: 'FunctionDef';
   name: string;
   params: Parameter[];
+  restParam?: string;
+  kwargsParam?: string;
   body: Statement[];
 }
 
 export interface Parameter {
   name: string;
   default?: Expression;
+}
+
+export interface Raise extends ASTNode {
+  type: 'Raise';
+  value: Expression | null;
+}
+
+export interface Global extends ASTNode {
+  type: 'Global';
+  names: string[];
+}
+
+export interface Nonlocal extends ASTNode {
+  type: 'Nonlocal';
+  names: string[];
 }
 
 export interface Return extends ASTNode {
@@ -286,6 +305,9 @@ export type Statement =
   | Break
   | Continue
   | Pass
-  | Try;
+  | Try
+  | Raise
+  | Global
+  | Nonlocal;
 
 export type Program = Statement[];

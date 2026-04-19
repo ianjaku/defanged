@@ -284,15 +284,24 @@ export function getStringMethod(obj: PyValue & { type: 'string' }, attr: string,
     format: {
       type: 'builtin',
       name: 'str.format',
-      fn: (...args: PyValue[]) => {
+      acceptsKwargs: true,
+      fn: (...rawArgs: (PyValue | PyKwargs)[]) => {
+        const { args, kwargs } = extractKwargs(rawArgs);
         let result = str;
         let argIndex = 0;
-        result = result.replace(/\{(\d*)\}/g, (_, idx) => {
-          const index = idx === '' ? argIndex++ : parseInt(idx, 10);
-          if (index >= args.length) {
-            throw new IndexError('tuple index out of range', line, column);
+        result = result.replace(/\{(\w*)\}/g, (match, key) => {
+          if (key === '' || /^\d+$/.test(key)) {
+            const index = key === '' ? argIndex++ : parseInt(key, 10);
+            if (index >= args.length) {
+              throw new IndexError('tuple index out of range', line, column);
+            }
+            return isString(args[index]) ? args[index].value : String(valueToJs(args[index]));
           }
-          return isString(args[index]) ? args[index].value : String(valueToJs(args[index]));
+          if (kwargs[key] !== undefined) {
+            const val = kwargs[key];
+            return isString(val) ? val.value : String(valueToJs(val));
+          }
+          return match;
         });
         return pyString(result);
       },
