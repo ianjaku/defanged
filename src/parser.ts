@@ -557,6 +557,14 @@ export class Parser {
       });
     }
 
+    // Parse optional else block (runs if no exception raised)
+    let orelse: Statement[] = [];
+    if (this.check(TokenType.ELSE)) {
+      this.advance();
+      this.consume(TokenType.COLON, "Expected ':' after else");
+      orelse = this.block();
+    }
+
     // Parse optional finally block
     let finalbody: Statement[] = [];
     if (this.match(TokenType.FINALLY)) {
@@ -573,6 +581,7 @@ export class Parser {
       type: 'Try',
       body,
       handlers,
+      orelse,
       finalbody,
       line: token.line,
       column: token.column,

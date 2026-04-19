@@ -303,7 +303,7 @@ export class Interpreter {
       case 'Try': {
         let result: PyValue = pyNone();
         let caughtError: Error | null = null;
-        
+
         // Execute try block
         try {
           result = await this.executeBlock(stmt.body, env);
@@ -312,44 +312,44 @@ export class Interpreter {
           if (e instanceof ReturnException || e instanceof BreakException || e instanceof ContinueException) {
             throw e;
           }
-          
+
           caughtError = e as Error;
-          
+
           // Find matching except handler
           let handled = false;
           for (const handler of stmt.handlers) {
-            // Check if this handler matches the exception
             const matches = this.exceptionMatches(caughtError, handler.exceptionTypes);
             if (matches) {
               handled = true;
-              
-              // Bind exception to variable if specified
+
               if (handler.name) {
-                // Use baseMessage if available (for our custom errors), otherwise use message
                 const errorMsg = (caughtError as any).baseMessage || caughtError.message;
                 env.set(handler.name, pyString(errorMsg));
               }
-              
+
               result = await this.executeBlock(handler.body, env);
               break;
             }
           }
-          
-          // If no handler matched, re-throw after finally
+
           if (!handled) {
-            // Execute finally block first
             if (stmt.finalbody.length > 0) {
               await this.executeBlock(stmt.finalbody, env);
             }
             throw caughtError;
           }
         }
-        
+
+        // else block runs only if no exception was raised
+        if (!caughtError && stmt.orelse.length > 0) {
+          result = await this.executeBlock(stmt.orelse, env);
+        }
+
         // Execute finally block
         if (stmt.finalbody.length > 0) {
           await this.executeBlock(stmt.finalbody, env);
         }
-        
+
         return result;
       }
 

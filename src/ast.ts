@@ -301,6 +301,7 @@ export interface Try extends ASTNode {
   type: 'Try';
   body: Statement[];
   handlers: ExceptHandler[];
+  orelse: Statement[];     // else block (runs if no exception)
   finalbody: Statement[];  // finally block
 }
 

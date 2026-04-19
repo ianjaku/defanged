@@ -1766,3 +1766,52 @@ describe('isinstance with type builtins', () => {
     expect(await runPython('isinstance([], (int, str))')).toBe(false);
   });
 });
+
+// ─── try/except/else ────────────────────────────────────────────────────────
+
+describe('try/except/else', () => {
+  test('else runs when no exception', async () => {
+    const output: string[] = [];
+    const interp = createInterpreter({ onPrint: (s) => output.push(s) });
+    await interp.run(`
+try:
+    x = 1
+except:
+    x = 2
+else:
+    x = 3
+x`);
+    expect(await interp.run('x')).toBe(3);
+  });
+
+  test('else does not run when exception caught', async () => {
+    const interp = createInterpreter({ onPrint: () => {} });
+    await interp.run(`
+result = 0
+try:
+    raise ValueError("oops")
+except ValueError:
+    result = 1
+else:
+    result = 2
+`);
+    expect(await interp.run('result')).toBe(1);
+  });
+
+  test('try/except/else/finally all together', async () => {
+    const output: string[] = [];
+    const interp = createInterpreter({ onPrint: (s) => output.push(s) });
+    await interp.run(`
+result = []
+try:
+    result.append("try")
+except:
+    result.append("except")
+else:
+    result.append("else")
+finally:
+    result.append("finally")
+`);
+    expect(await interp.run('result')).toEqual(["try", "else", "finally"]);
+  });
+});
