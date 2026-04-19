@@ -46,6 +46,7 @@
     "build": "bun build ./src/index.ts --outdir ./dist --target node --format esm && tsc --emitDeclarationOnly --declaration --outDir dist",
     "test": "bun test",
     "test:features": "bun test tests/features.test.ts",
+    "bench": "bun benchmarks/run.ts",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "bun run build"
   },
