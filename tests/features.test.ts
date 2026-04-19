@@ -2063,3 +2063,32 @@ describe('slice assignment', () => {
     expect(await runPython('x = [1, 2, 3, 4]\nx[1:3] = []\nx')).toEqual([1, 4]);
   });
 });
+
+// ─── iter / next / hash / id ────────────────────────────────────────────────
+
+describe('iter and next builtins', () => {
+  test('iter and next basics', async () => {
+    expect(await runPython(`
+it = iter([10, 20, 30])
+a = next(it)
+b = next(it)
+a + b
+`)).toBe(30);
+  });
+
+  test('next with default', async () => {
+    expect(await runPython(`
+it = iter([1])
+next(it)
+next(it, 99)
+`)).toBe(99);
+  });
+
+  test('hash of string', async () => {
+    expect(await runPython('isinstance(hash("hello"), int)')).toBe(true);
+  });
+
+  test('id returns number', async () => {
+    expect(await runPython('isinstance(id(42), int)')).toBe(true);
+  });
+});

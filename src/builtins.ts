@@ -764,6 +764,72 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
     },
   });
 
+  // iter(iterable) - Return an iterator
+  builtins.set('iter', {
+    type: 'builtin',
+    name: 'iter',
+    fn: (obj: PyValue): PyValue => {
+      if (obj.type === 'iterator') return obj;
+      if (isList(obj) || isTuple(obj)) return pyIterator([...obj.elements]);
+      if (isString(obj)) return pyIterator(obj.value.split('').map(c => pyString(c)));
+      if (isDict(obj)) {
+        return pyIterator(Array.from(obj.entries.keys()).map(k =>
+          typeof k === 'string' ? pyString(k) : typeof k === 'number' ? pyNumber(k) : pyBoolean(k as boolean)
+        ));
+      }
+      throw new TypeError(`'${obj.type}' object is not iterable`, 0, 0);
+    },
+  });
+
+  // next(iterator[, default]) - Get next item
+  builtins.set('next', {
+    type: 'builtin',
+    name: 'next',
+    fn: (iter: PyValue, defaultVal?: PyValue): PyValue => {
+      if (iter.type !== 'iterator') throw new TypeError(`'${iter.type}' object is not an iterator`, 0, 0);
+      if (iter.index >= iter.values.length) {
+        if (defaultVal !== undefined) return defaultVal;
+        throw new ValueError('StopIteration', 0, 0);
+      }
+      return iter.values[iter.index++];
+    },
+  });
+
+  // hash(obj) - Return hash value
+  builtins.set('hash', {
+    type: 'builtin',
+    name: 'hash',
+    fn: (obj: PyValue): PyValue => {
+      if (isNumber(obj)) return pyNumber(obj.value);
+      if (isString(obj)) {
+        let h = 0;
+        for (let i = 0; i < obj.value.length; i++) {
+          h = ((h << 5) - h + obj.value.charCodeAt(i)) | 0;
+        }
+        return pyNumber(h);
+      }
+      if (obj.type === 'boolean') return pyNumber(obj.value ? 1 : 0);
+      if (obj.type === 'none') return pyNumber(0);
+      throw new TypeError(`unhashable type: '${obj.type}'`, 0, 0);
+    },
+  });
+
+  // id(obj) - Return identity (address-like integer)
+  builtins.set('id', {
+    type: 'builtin',
+    name: 'id',
+    fn: (obj: PyValue): PyValue => {
+      // Deterministic but unique-ish placeholder
+      if (isNumber(obj)) return pyNumber(obj.value * 997 + 1);
+      if (isString(obj)) {
+        let h = 0;
+        for (let i = 0; i < obj.value.length; i++) h = ((h << 5) - h + obj.value.charCodeAt(i)) | 0;
+        return pyNumber(h);
+      }
+      return pyNumber(Math.floor(Math.random() * 1e9));
+    },
+  });
+
   // repr(obj) - Return string representation
   builtins.set('repr', {
     type: 'builtin',
