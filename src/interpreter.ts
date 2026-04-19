@@ -589,10 +589,29 @@ export class Interpreter {
           args.push(await this.evaluate(arg, env));
         }
 
-        // Handle keyword arguments (simplified)
+        // Expand *args
+        if (expr.starArgs) {
+          for (const starExpr of expr.starArgs) {
+            const starVal = await this.evaluate(starExpr, env);
+            const items = this.getIterableItems(starVal, expr.line, expr.column);
+            args.push(...items);
+          }
+        }
+
         const kwargs: Record<string, PyValue> = {};
         for (const kw of expr.kwargs) {
           kwargs[kw.name] = await this.evaluate(kw.value, env);
+        }
+
+        // Expand **kwargs
+        if (expr.doubleStarArgs) {
+          for (const dsExpr of expr.doubleStarArgs) {
+            const dsVal = await this.evaluate(dsExpr, env);
+            if (!isDict(dsVal)) throw new TypeError(`argument after ** must be a mapping`, expr.line, expr.column);
+            for (const [k, v] of dsVal.entries) {
+              kwargs[String(k)] = v;
+            }
+          }
         }
 
         return await this.call(func, args, kwargs, expr.line, expr.column);

@@ -1937,6 +1937,23 @@ add_one(5)
 `)).toBe(12);
   });
 
+  test('decorator with arguments (factory)', async () => {
+    expect(await runPython(`
+def multiply(factor):
+    def decorator(fn):
+        def wrapper(x):
+            return fn(x) * factor
+        return wrapper
+    return decorator
+
+@multiply(3)
+def add_one(x):
+    return x + 1
+
+add_one(5)
+`)).toBe(18);
+  });
+
   test('stacked decorators', async () => {
     expect(await runPython(`
 def add_prefix(fn):
@@ -1956,5 +1973,35 @@ def greet():
 
 greet()
 `)).toBe("prefix_hello_suffix");
+  });
+});
+
+// ─── Star unpacking in calls ────────────────────────────────────────────────
+
+describe('* and ** unpacking in calls', () => {
+  test('*list unpacking', async () => {
+    expect(await runPython(`
+def add(a, b, c):
+    return a + b + c
+args = [1, 2, 3]
+add(*args)
+`)).toBe(6);
+  });
+
+  test('**dict unpacking', async () => {
+    expect(await runPython(`
+def greet(name, greeting):
+    return greeting + " " + name
+kw = {"name": "Alice", "greeting": "Hello"}
+greet(**kw)
+`)).toBe("Hello Alice");
+  });
+
+  test('mixed positional and *unpacking', async () => {
+    expect(await runPython(`
+def f(a, b, c, d):
+    return a + b + c + d
+f(1, *[2, 3], 4)
+`)).toBe(10);
   });
 });

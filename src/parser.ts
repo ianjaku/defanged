@@ -1419,13 +1419,15 @@ export class Parser {
     while (true) {
       // Function call
       if (this.match(TokenType.LPAREN)) {
-        const { args, kwargs } = this.argumentList();
+        const { args, kwargs, starArgs, doubleStarArgs } = this.argumentList();
         this.consume(TokenType.RPAREN, "Expected ')' after arguments");
         expr = {
           type: 'Call',
           func: expr,
           args,
           kwargs,
+          starArgs,
+          doubleStarArgs,
           line: expr.line,
           column: expr.column,
         };
@@ -1457,14 +1459,19 @@ export class Parser {
     return expr;
   }
 
-  private argumentList(): { args: Expression[]; kwargs: { name: string; value: Expression }[] } {
+  private argumentList(): { args: Expression[]; kwargs: { name: string; value: Expression }[]; starArgs?: Expression[]; doubleStarArgs?: Expression[] } {
     const args: Expression[] = [];
     const kwargs: { name: string; value: Expression }[] = [];
+    const starArgs: Expression[] = [];
+    const doubleStarArgs: Expression[] = [];
 
     if (!this.check(TokenType.RPAREN)) {
       do {
-        // Check for keyword argument
-        if (this.check(TokenType.IDENTIFIER) && this.peekNext()?.type === TokenType.ASSIGN) {
+        if (this.match(TokenType.DOUBLE_STAR)) {
+          doubleStarArgs.push(this.expression());
+        } else if (this.match(TokenType.STAR)) {
+          starArgs.push(this.expression());
+        } else if (this.check(TokenType.IDENTIFIER) && this.peekNext()?.type === TokenType.ASSIGN) {
           const nameToken = this.advance();
           this.advance(); // consume '='
           const value = this.expression();
@@ -1472,8 +1479,6 @@ export class Parser {
         } else {
           const first = this.expression();
 
-          // Generator expression in call args: f(x for x in y if ...)
-          // Python allows this without extra parentheses.
           if (this.check(TokenType.FOR)) {
             const generators = this.comprehensionGenerators();
             args.push({
@@ -1490,7 +1495,12 @@ export class Parser {
       } while (this.match(TokenType.COMMA));
     }
 
-    return { args, kwargs };
+    return {
+      args,
+      kwargs,
+      starArgs: starArgs.length > 0 ? starArgs : undefined,
+      doubleStarArgs: doubleStarArgs.length > 0 ? doubleStarArgs : undefined,
+    };
   }
 
   private subscriptOrSlice(object: Expression): Expression {

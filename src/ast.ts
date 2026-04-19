@@ -66,6 +66,8 @@ export interface Call extends ASTNode {
   func: Expression;
   args: Expression[];
   kwargs: { name: string; value: Expression }[];
+  starArgs?: Expression[];
+  doubleStarArgs?: Expression[];
 }
 
 export interface Subscript extends ASTNode {
