@@ -97,9 +97,23 @@ const b = await interpreter.run(codeTwo);
 
 A quick overview — see [`FEATURES.md`](./FEATURES.md) for the authoritative list with TypeScript analogues for every feature.
 
-**Works:** numbers, strings, f-strings (including format specs and nested quotes), booleans (with int arithmetic), `None`, lists, tuples, dicts, sets, comprehensions (list, dict, set), `if`/`elif`/`else`, `for`/`while` (with `else` clauses), `break`/`continue`/`pass`, `try`/`except`/`finally`, `raise`, function definitions with `*args`/`**kwargs` and defaults, closures, lambdas (including as keyword arguments), chained assignment (`x = y = 5`), tuple unpacking, chained comparisons (`0 < x < 10`), slicing, `and`/`or`/`not`, ternary expressions, walrus (`:=`), string/list/dict/set methods, and ~30 built-ins (`len`, `range`, `sum`, `sorted`, `enumerate`, `zip`, `map`, `filter`, `any`, `all`, `print`, etc.).
+**Works:** numbers, strings, f-strings (including format specs and nested quotes), booleans (with int arithmetic), `None`, lists, tuples, dicts, sets, comprehensions (list, dict, set), `if`/`elif`/`else`, `for`/`while` (with `else` clauses), `break`/`continue`/`pass`, `try`/`except`/`finally`, `raise`, function definitions with `*args`/`**kwargs` and defaults, closures, lambdas (including as keyword arguments), decorators, generators (`yield`, `yield from`, `next()`), chained assignment (`x = y = 5`), tuple unpacking, chained comparisons (`0 < x < 10`), slicing, `and`/`or`/`not`, bitwise operators, ternary expressions, walrus (`:=`), string/list/dict/set methods, and ~40 built-ins (`len`, `range`, `sum`, `sorted`, `enumerate`, `zip`, `map`, `filter`, `any`, `all`, `print`, `iter`, `next`, `hash`, `id`, etc.).
 
-**Intentionally absent (for safety):** `import`, `open`, `exec`, `eval`, `__import__`, `globals`, `locals`, `compile`, filesystem I/O, network, subprocess, classes, decorators, generators, `async`/`await`.
+### Not supported
+
+| Feature | Reason |
+|---|---|
+| `import` / modules | **Safety.** No module system exists — there is nothing to import. |
+| `exec` / `eval` / `compile` | **Safety.** Dynamic code execution would bypass the sandbox. |
+| `open` / filesystem I/O | **Safety.** No filesystem access. Data comes in through tools. |
+| `__import__` / `globals` / `locals` | **Safety.** Introspection escapes could leak or mutate interpreter state. |
+| Network / subprocess | **Safety.** No `os`, `socket`, `subprocess`, `urllib`, or `requests`. |
+| `class` definitions | **Not useful for agents.** AI-generated sandbox code is short and procedural — dicts, tuples, and functions cover every practical case. Classes are a code organization tool for larger programs. |
+| `with` statement | **Blocked by classes.** Context managers require `__enter__`/`__exit__` methods, and every real-world use case (`open()`, DB connections, locks) involves I/O that the sandbox doesn't have. |
+| `async` / `await` | **Not applicable.** The sandbox has no I/O to await. Concurrency is not meaningful in a single-threaded, network-free interpreter. |
+| `input()` | **Not applicable.** There is no interactive stdin. Data should be passed in via tools. |
+| `str.encode()` / `bytes` type | **Not useful for agents.** Binary data handling is irrelevant in a text-processing sandbox. |
+| Default mutable argument sharing | **Intentional deviation.** In CPython, `def f(x=[]):` shares the list across calls — a well-known footgun. defang creates a fresh default each call, which is safer for sandboxed use. |
 
 ---
 
