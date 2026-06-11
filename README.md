@@ -97,13 +97,13 @@ const b = await interpreter.run(codeTwo);
 
 A quick overview — see [`FEATURES.md`](./FEATURES.md) for the authoritative list with TypeScript analogues for every feature.
 
-**Works:** numbers, strings, f-strings (including format specs and nested quotes), booleans (with int arithmetic), `None`, lists, tuples, dicts, sets, comprehensions (list, dict, set), `if`/`elif`/`else`, `for`/`while` (with `else` clauses), `break`/`continue`/`pass`, `try`/`except`/`finally`, `raise`, function definitions with `*args`/`**kwargs` and defaults, closures, lambdas (including as keyword arguments), decorators, generators (`yield`, `yield from`, `next()`), chained assignment (`x = y = 5`), tuple unpacking, chained comparisons (`0 < x < 10`), slicing, `and`/`or`/`not`, bitwise operators, ternary expressions, walrus (`:=`), string/list/dict/set methods, and ~40 built-ins (`len`, `range`, `sum`, `sorted`, `enumerate`, `zip`, `map`, `filter`, `any`, `all`, `print`, `iter`, `next`, `hash`, `id`, etc.).
+**Works:** numbers, strings, f-strings (including format specs and nested quotes), booleans (with int arithmetic), `None`, lists, tuples, dicts, sets, comprehensions (list, dict, set), `if`/`elif`/`else`, `for`/`while` (with `else` clauses), `break`/`continue`/`pass`, `try`/`except`/`finally`, `raise`, function definitions with `*args`/`**kwargs` and defaults, closures, lambdas (including as keyword arguments), decorators, generators (`yield`, `yield from`, `next()`), chained assignment (`x = y = 5`), tuple unpacking, chained comparisons (`0 < x < 10`), slicing, `and`/`or`/`not`, bitwise operators, ternary expressions, walrus (`:=`), string/list/dict/set methods, the `datetime` module (`datetime`, `date`, `timedelta` — naive, with a host-configurable clock and session timezone), and ~40 built-ins (`len`, `range`, `sum`, `sorted`, `enumerate`, `zip`, `map`, `filter`, `any`, `all`, `print`, `iter`, `next`, `hash`, `id`, etc.).
 
 ### Not supported
 
 | Feature | Reason |
 |---|---|
-| `import` / modules | **Safety.** No module system exists — there is nothing to import. |
+| Modules other than `datetime` | **Safety.** There is no real module system — `import datetime` resolves against a built-in whitelist containing only the pure-computation `datetime` module. Nothing importable touches the filesystem, network, or process. Everything else raises `ModuleNotFoundError`. |
 | `exec` / `eval` / `compile` | **Safety.** Dynamic code execution would bypass the sandbox. |
 | `open` / filesystem I/O | **Safety.** No filesystem access. Data comes in through tools. |
 | `__import__` / `globals` / `locals` | **Safety.** Introspection escapes could leak or mutate interpreter state. |
@@ -154,6 +154,8 @@ Long-lived interpreter. Options:
 - `tools: ToolDefinition[]` — functions callable from Python
 - `onPrint: (msg: string) => void` — called for every `print()` invocation
 - `maxIterations: number` — loop iteration budget (default 100,000)
+- `now: () => number` — clock for `datetime.now()` / `date.today()`, in epoch milliseconds (default `Date.now`)
+- `timezone: string` — IANA timezone the sandboxed code appears to run in, e.g. `'Europe/Berlin'` (default `'UTC'`). Affects `datetime.now()`, `date.today()`, and how `fromisoformat()` localizes `Z`/offset-suffixed timestamps; pass the end user's timezone so dates render in their local time. All datetimes stay naive — see `FEATURES.md` for the full model.
 
 ### `ToolDefinition`
 

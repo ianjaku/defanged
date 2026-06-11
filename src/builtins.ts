@@ -28,6 +28,7 @@ import {
   valueToJs,
 } from './values';
 import { TypeError, ValueError } from './errors';
+import { isDatetimeLike, datetimeOrdering } from './datetime';
 
 /** Type guard for kwargs object */
 function isKwargs(val: PyValue | PyKwargs): val is PyKwargs {
@@ -60,6 +61,10 @@ export function compareValues(a: PyValue, b: PyValue): number {
       if (cmp !== 0) return cmp;
     }
     return a.elements.length - b.elements.length;
+  }
+  if (isDatetimeLike(a) || isDatetimeLike(b)) {
+    const cmp = datetimeOrdering(a, b, 0, 0);
+    if (cmp !== null) return cmp;
   }
   throw new TypeError(`'<' not supported between '${a.type}' and '${b.type}'`, 0, 0);
 }
@@ -865,6 +870,10 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
         'builtin': 'builtin_function_or_method',
         'iterator': 'iterator',
         'generator': 'generator',
+        'date': 'datetime.date',
+        'datetime': 'datetime.datetime',
+        'timedelta': 'datetime.timedelta',
+        'module': 'module',
       };
       return pyString(`<class '${typeNames[obj.type] || obj.type}'>`);
     },
@@ -884,6 +893,10 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
         'dict': ['dict'],
         'set': ['set'],
         'tuple': ['tuple'],
+        // datetime is a date subclass in CPython
+        'datetime.date': ['date', 'datetime'],
+        'datetime.datetime': ['datetime'],
+        'datetime.timedelta': ['timedelta'],
       };
 
       const checkType = (typeName: string): boolean => {
@@ -1121,7 +1134,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
   });
 
   // Exception constructors — return a tagged value that `raise` can inspect
-  for (const name of ['Exception', 'ValueError', 'TypeError', 'KeyError', 'IndexError', 'ZeroDivisionError', 'NameError', 'RuntimeError', 'StopIteration']) {
+  for (const name of ['Exception', 'ValueError', 'TypeError', 'KeyError', 'IndexError', 'ZeroDivisionError', 'NameError', 'RuntimeError', 'StopIteration', 'ImportError', 'ModuleNotFoundError']) {
     builtins.set(name, {
       type: 'builtin',
       name,

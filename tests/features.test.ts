@@ -2389,3 +2389,631 @@ describe('dict.fromkeys', () => {
     expect(await runPython(`dict.fromkeys([1, 2, 2, 3])`)).toEqual({ 1: null, 2: null, 3: null });
   });
 });
+
+// ─── datetime module: imports ────────────────────────────────────────────────
+// Expected values in this section and the ones below were verified against
+// CPython 3.9.6 (except the documented timezone-normalization deviations).
+
+describe('datetime module - imports', () => {
+  test('import datetime', async () => {
+    expect(await runPython(`import datetime\ndatetime.date(2026, 6, 11).isoformat()`)).toBe('2026-06-11');
+  });
+
+  test('import datetime as dt', async () => {
+    expect(await runPython(`import datetime as dt\ndt.datetime(2026, 6, 11).year`)).toBe(2026);
+  });
+
+  test('from datetime import datetime, date, timedelta', async () => {
+    expect(await runPython(`
+from datetime import datetime, date, timedelta
+[datetime(2026, 1, 2).day, date(2026, 3, 4).month, timedelta(days=5).days]
+`)).toEqual([2, 3, 5]);
+  });
+
+  test('from datetime import datetime as DT', async () => {
+    expect(await runPython(`from datetime import datetime as DT\nDT(2026, 1, 1).month`)).toBe(1);
+  });
+
+  test('from datetime import *', async () => {
+    expect(await runPython(`from datetime import *\ndate(2026, 6, 11).year`)).toBe(2026);
+  });
+
+  test('import os raises ModuleNotFoundError', async () => {
+    await expect(runPython(`import os`)).rejects.toThrow("No module named 'os'");
+  });
+
+  test('import os.path raises with full dotted name', async () => {
+    await expect(runPython(`import os.path`)).rejects.toThrow("No module named 'os.path'");
+  });
+
+  test('from datetime import foo raises ImportError', async () => {
+    await expect(runPython(`from datetime import foo`)).rejects.toThrow("cannot import name 'foo' from 'datetime'");
+  });
+
+  test('except ImportError catches missing module', async () => {
+    expect(await runPython(`
+try:
+    import requests
+except ImportError:
+    x = 'caught'
+x
+`)).toBe('caught');
+  });
+
+  test('except ModuleNotFoundError catches missing module', async () => {
+    expect(await runPython(`
+try:
+    import numpy
+except ModuleNotFoundError:
+    x = 'caught'
+x
+`)).toBe('caught');
+  });
+
+  test('module attribute error', async () => {
+    await expect(runPython(`import datetime\ndatetime.bogus`)).rejects.toThrow("module 'datetime' has no attribute 'bogus'");
+  });
+});
+
+// ─── datetime module: constructors, attributes, validation ──────────────────
+
+describe('datetime module - constructors and validation', () => {
+  test('datetime full positional constructor and attributes', async () => {
+    expect(await runPython(`
+from datetime import datetime
+d = datetime(2026, 6, 11, 14, 30, 5, 123456)
+[d.year, d.month, d.day, d.hour, d.minute, d.second, d.microsecond]
+`)).toEqual([2026, 6, 11, 14, 30, 5, 123456]);
+  });
+
+  test('datetime keyword constructor', async () => {
+    expect(await runPython(`
+from datetime import datetime
+datetime(year=2026, month=6, day=11).isoformat()
+`)).toBe('2026-06-11T00:00:00');
+  });
+
+  test('date constructor and attributes', async () => {
+    expect(await runPython(`
+from datetime import date
+d = date(2026, 6, 11)
+[d.year, d.month, d.day]
+`)).toEqual([2026, 6, 11]);
+  });
+
+  test('timedelta kwargs and normalized attributes', async () => {
+    expect(await runPython(`
+from datetime import timedelta
+t = timedelta(days=1, seconds=30)
+[t.days, t.seconds, t.microseconds]
+`)).toEqual([1, 30, 0]);
+  });
+
+  test('timedelta accepts float kwargs', async () => {
+    expect(await runPython(`
+from datetime import timedelta
+repr(timedelta(hours=2.5))
+`)).toBe('datetime.timedelta(seconds=9000)');
+  });
+
+  test('month out of range', async () => {
+    await expect(runPython(`
+from datetime import datetime
+datetime(2026, 13, 1)
+`)).rejects.toThrow('month must be in 1..12');
+  });
+
+  test('day out of range for month', async () => {
+    await expect(runPython(`
+from datetime import date
+date(2026, 2, 30)
+`)).rejects.toThrow('day is out of range for month');
+  });
+
+  test('hour out of range', async () => {
+    await expect(runPython(`
+from datetime import datetime
+datetime(2026, 6, 11, 24)
+`)).rejects.toThrow('hour must be in 0..23');
+  });
+
+  test('constructor ValueError is catchable', async () => {
+    expect(await runPython(`
+from datetime import date
+try:
+    date(2026, 2, 30)
+except ValueError:
+    x = 'caught'
+x
+`)).toBe('caught');
+  });
+});
+
+// ─── datetime module: repr / str / isoformat ─────────────────────────────────
+
+describe('datetime module - repr, str, isoformat', () => {
+  test('datetime repr suppresses seconds/microseconds when zero', async () => {
+    expect(await runPython(`
+from datetime import datetime
+repr(datetime(2026, 6, 11))
+`)).toBe('datetime.datetime(2026, 6, 11, 0, 0)');
+  });
+
+  test('datetime repr with all components', async () => {
+    expect(await runPython(`
+from datetime import datetime
+repr(datetime(2026, 6, 11, 14, 30, 5, 123456))
+`)).toBe('datetime.datetime(2026, 6, 11, 14, 30, 5, 123456)');
+  });
+
+  test('datetime str', async () => {
+    expect(await runPython(`
+from datetime import datetime
+str(datetime(2026, 6, 11))
+`)).toBe('2026-06-11 00:00:00');
+  });
+
+  test('datetime str with microseconds', async () => {
+    expect(await runPython(`
+from datetime import datetime
+str(datetime(2026, 6, 11, 14, 30, 5, 123456))
+`)).toBe('2026-06-11 14:30:05.123456');
+  });
+
+  test('datetime isoformat with microseconds', async () => {
+    expect(await runPython(`
+from datetime import datetime
+datetime(2026, 6, 11, 14, 30, 5, 123456).isoformat()
+`)).toBe('2026-06-11T14:30:05.123456');
+  });
+
+  test('datetime isoformat shows seconds when nonzero', async () => {
+    expect(await runPython(`
+from datetime import datetime
+datetime(2026, 6, 11, 0, 0, 5).isoformat()
+`)).toBe('2026-06-11T00:00:05');
+  });
+
+  test('date repr and str', async () => {
+    expect(await runPython(`
+from datetime import date
+[repr(date(2026, 6, 11)), str(date(2026, 6, 11))]
+`)).toEqual(['datetime.date(2026, 6, 11)', '2026-06-11']);
+  });
+
+  test('timedelta repr shows only nonzero components', async () => {
+    expect(await runPython(`
+from datetime import timedelta
+[repr(timedelta(days=1)), repr(timedelta(0))]
+`)).toEqual(['datetime.timedelta(days=1)', 'datetime.timedelta(0)']);
+  });
+
+  test('timedelta str', async () => {
+    expect(await runPython(`
+from datetime import timedelta
+str(timedelta(days=2, hours=3, minutes=4, seconds=5, microseconds=6))
+`)).toBe('2 days, 3:04:05.000006');
+  });
+
+  test('timedelta str singular day', async () => {
+    expect(await runPython(`
+from datetime import timedelta
+str(timedelta(days=1))
+`)).toBe('1 day, 0:00:00');
+  });
+
+  test('print(datetime) goes through str', async () => {
+    const outputs: string[] = [];
+    const interpreter = createInterpreter({ onPrint: (s) => outputs.push(s) });
+    await interpreter.run(`
+from datetime import datetime
+print(datetime(2026, 6, 11, 14, 30))
+`);
+    expect(outputs).toEqual(['2026-06-11 14:30:00']);
+  });
+});
+
+// ─── datetime module: arithmetic ─────────────────────────────────────────────
+
+describe('datetime module - arithmetic', () => {
+  test('datetime + timedelta rolls over month', async () => {
+    expect(await runPython(`
+from datetime import datetime, timedelta
+(datetime(2026, 6, 30) + timedelta(days=1)).isoformat()
+`)).toBe('2026-07-01T00:00:00');
+  });
+
+  test('date + timedelta leap year', async () => {
+    expect(await runPython(`
+from datetime import date, timedelta
+(date(2024, 2, 28) + timedelta(days=1)).isoformat()
+`)).toBe('2024-02-29');
+  });
+
+  test('date + timedelta non-leap year', async () => {
+    expect(await runPython(`
+from datetime import date, timedelta
+(date(2023, 2, 28) + timedelta(days=1)).isoformat()
+`)).toBe('2023-03-01');
+  });
+
+  test('datetime - timedelta crosses midnight', async () => {
+    expect(await runPython(`
+from datetime import datetime, timedelta
+repr(datetime(2026, 6, 11, 14, 30) - timedelta(hours=15))
+`)).toBe('datetime.datetime(2026, 6, 10, 23, 30)');
+  });
+
+  test('datetime - datetime gives timedelta', async () => {
+    expect(await runPython(`
+from datetime import datetime
+repr(datetime(2026, 6, 11, 10, 0) - datetime(2026, 6, 10, 9, 30))
+`)).toBe('datetime.timedelta(days=1, seconds=1800)');
+  });
+
+  test('date - date .days', async () => {
+    expect(await runPython(`
+from datetime import date
+(date(2026, 6, 11) - date(2026, 1, 1)).days
+`)).toBe(161);
+  });
+
+  test('timedelta * float', async () => {
+    expect(await runPython(`
+from datetime import timedelta
+repr(timedelta(hours=1) * 2.5)
+`)).toBe('datetime.timedelta(seconds=9000)');
+  });
+
+  test('float * timedelta (commutative)', async () => {
+    expect(await runPython(`
+from datetime import timedelta
+str(2.5 * timedelta(hours=1))
+`)).toBe('2:30:00');
+  });
+
+  test('timedelta / number', async () => {
+    expect(await runPython(`
+from datetime import timedelta
+str(timedelta(hours=1) / 2)
+`)).toBe('0:30:00');
+  });
+
+  test('timedelta + timedelta and total_seconds', async () => {
+    expect(await runPython(`
+from datetime import timedelta
+(timedelta(days=1) + timedelta(seconds=30)).total_seconds()
+`)).toBe(86430);
+  });
+
+  test('timedelta + datetime (commutative, microsecond precision)', async () => {
+    expect(await runPython(`
+from datetime import datetime, timedelta
+(timedelta(microseconds=1) + datetime(2026, 1, 1)).isoformat()
+`)).toBe('2026-01-01T00:00:00.000001');
+  });
+
+  test('date + date raises TypeError', async () => {
+    await expect(runPython(`
+from datetime import date
+date(2026, 1, 1) + date(2026, 1, 1)
+`)).rejects.toThrow('unsupported operand type(s) for +');
+  });
+});
+
+// ─── datetime module: timedelta normalization and negation ──────────────────
+
+describe('datetime module - timedelta normalization', () => {
+  test('negative seconds normalize like CPython', async () => {
+    expect(await runPython(`
+from datetime import timedelta
+repr(timedelta(seconds=-1))
+`)).toBe('datetime.timedelta(days=-1, seconds=86399)');
+  });
+
+  test('negative timedelta str', async () => {
+    expect(await runPython(`
+from datetime import timedelta
+str(timedelta(seconds=-1))
+`)).toBe('-1 day, 23:59:59');
+  });
+
+  test('unary minus', async () => {
+    expect(await runPython(`
+from datetime import timedelta
+repr(-timedelta(days=1, seconds=1))
+`)).toBe('datetime.timedelta(days=-2, seconds=86399)');
+  });
+
+  test('milliseconds carry into seconds and microseconds', async () => {
+    expect(await runPython(`
+from datetime import timedelta
+repr(timedelta(milliseconds=1500))
+`)).toBe('datetime.timedelta(seconds=1, microseconds=500000)');
+  });
+
+  test('weeks fold into days', async () => {
+    expect(await runPython(`
+from datetime import timedelta
+repr(timedelta(weeks=1, days=1))
+`)).toBe('datetime.timedelta(days=8)');
+  });
+
+  test('mixed-sign kwargs normalize', async () => {
+    expect(await runPython(`
+from datetime import timedelta
+repr(timedelta(days=1, hours=-1))
+`)).toBe('datetime.timedelta(seconds=82800)');
+  });
+
+  test('bool of timedelta', async () => {
+    expect(await runPython(`
+from datetime import timedelta
+[bool(timedelta(0)), bool(timedelta(seconds=1))]
+`)).toEqual([false, true]);
+  });
+});
+
+// ─── datetime module: comparisons ────────────────────────────────────────────
+
+describe('datetime module - comparisons', () => {
+  test('datetime ordering', async () => {
+    expect(await runPython(`
+from datetime import datetime
+a = datetime(2026, 1, 1)
+b = datetime(2026, 1, 2)
+[b > a, a < b, a <= a, b >= b, a != b, a == datetime(2026, 1, 1)]
+`)).toEqual([true, true, true, true, true, true]);
+  });
+
+  test('date ordering', async () => {
+    expect(await runPython(`
+from datetime import date
+[date(2026, 1, 1) < date(2026, 2, 1), date(2026, 1, 1) > date(2026, 2, 1)]
+`)).toEqual([true, false]);
+  });
+
+  test('timedelta ordering and cross-unit equality', async () => {
+    expect(await runPython(`
+from datetime import timedelta
+[timedelta(days=2) > timedelta(days=1), timedelta(days=1) == timedelta(hours=24)]
+`)).toEqual([true, true]);
+  });
+
+  test('date == datetime is False', async () => {
+    expect(await runPython(`
+from datetime import date, datetime
+date(2026, 1, 1) == datetime(2026, 1, 1)
+`)).toBe(false);
+  });
+
+  test('date < datetime raises TypeError', async () => {
+    await expect(runPython(`
+from datetime import date, datetime
+date(2026, 1, 1) < datetime(2026, 1, 1)
+`)).rejects.toThrow("can't compare datetime.datetime to datetime.date");
+  });
+
+  test('sorted over datetimes', async () => {
+    expect(await runPython(`
+from datetime import datetime
+sorted([datetime(2026, 1, 2), datetime(2026, 1, 1)])[0].isoformat()
+`)).toBe('2026-01-01T00:00:00');
+  });
+
+  test('min/max over dates', async () => {
+    expect(await runPython(`
+from datetime import date
+[min(date(2026, 1, 1), date(2025, 3, 1)).isoformat(), max(date(2026, 1, 1), date(2025, 3, 1)).year]
+`)).toEqual(['2025-03-01', 2026]);
+  });
+});
+
+// ─── datetime module: strftime / strptime ───────────────────────────────────
+
+describe('datetime module - strftime and strptime', () => {
+  test('strftime basic numeric directives', async () => {
+    expect(await runPython(`
+from datetime import datetime
+datetime(2026, 6, 11, 14, 30).strftime('%Y-%m-%d %H:%M:%S')
+`)).toBe('2026-06-11 14:30:00');
+  });
+
+  test('strftime names and 12-hour clock', async () => {
+    expect(await runPython(`
+from datetime import datetime
+datetime(2026, 6, 11, 14, 30).strftime('%A %B %d, %I:%M %p')
+`)).toBe('Thursday June 11, 02:30 PM');
+  });
+
+  test('strftime day-of-year, abbreviations, short year, literal percent', async () => {
+    expect(await runPython(`
+from datetime import datetime
+datetime(2026, 1, 5).strftime('%j %a %b %y %%')
+`)).toBe('005 Mon Jan 26 %');
+  });
+
+  test('strftime on date', async () => {
+    expect(await runPython(`
+from datetime import date
+date(2026, 6, 11).strftime('%Y/%m/%d')
+`)).toBe('2026/06/11');
+  });
+
+  test('strptime parses', async () => {
+    expect(await runPython(`
+from datetime import datetime
+repr(datetime.strptime('11/06/2026 14:30', '%d/%m/%Y %H:%M'))
+`)).toBe('datetime.datetime(2026, 6, 11, 14, 30)');
+  });
+
+  test('strptime with month name and 12-hour clock', async () => {
+    expect(await runPython(`
+from datetime import datetime
+datetime.strptime('June 11, 2026 02:30 PM', '%B %d, %Y %I:%M %p').isoformat()
+`)).toBe('2026-06-11T14:30:00');
+  });
+
+  test('strptime mismatch raises ValueError', async () => {
+    await expect(runPython(`
+from datetime import datetime
+datetime.strptime('xx', '%Y-%m-%d')
+`)).rejects.toThrow("time data 'xx' does not match format '%Y-%m-%d'");
+  });
+
+  test('f-string format spec delegates to strftime', async () => {
+    expect(await runPython(`
+from datetime import datetime
+f"{datetime(2026, 6, 11):%Y-%m}"
+`)).toBe('2026-06');
+  });
+});
+
+// ─── datetime module: now/today with injected clock and timezone ────────────
+
+describe('datetime module - clock and timezone injection', () => {
+  const FIXED_NOW = Date.UTC(2026, 5, 11, 14, 30, 0); // 2026-06-11T14:30:00Z
+
+  test('now() with injected clock, default timezone UTC', async () => {
+    const interpreter = createInterpreter({ now: () => FIXED_NOW });
+    expect(await interpreter.run(`
+from datetime import datetime
+datetime.now().isoformat()
+`)).toBe('2026-06-11T14:30:00');
+  });
+
+  test('now() respects session timezone (New York, EDT)', async () => {
+    const interpreter = createInterpreter({ now: () => FIXED_NOW, timezone: 'America/New_York' });
+    expect(await interpreter.run(`
+from datetime import datetime
+datetime.now().isoformat()
+`)).toBe('2026-06-11T10:30:00');
+  });
+
+  test('now() respects session timezone (Tokyo)', async () => {
+    const interpreter = createInterpreter({ now: () => FIXED_NOW, timezone: 'Asia/Tokyo' });
+    expect(await interpreter.run(`
+from datetime import datetime
+datetime.now().isoformat()
+`)).toBe('2026-06-11T23:30:00');
+  });
+
+  test('date.today() consistent with timezone', async () => {
+    // 2026-06-11T01:30:00Z is still 2026-06-10 in New York
+    const interpreter = createInterpreter({ now: () => Date.UTC(2026, 5, 11, 1, 30, 0), timezone: 'America/New_York' });
+    expect(await interpreter.run(`
+from datetime import date
+date.today().isoformat()
+`)).toBe('2026-06-10');
+  });
+
+  test('default clock is Date.now', async () => {
+    expect(await runPython(`
+from datetime import datetime
+datetime.now().year >= 2026
+`)).toBe(true);
+  });
+
+  test('invalid timezone throws at construction', () => {
+    expect(() => createInterpreter({ timezone: 'Not/AZone' })).toThrow();
+  });
+});
+
+// ─── datetime module: fromisoformat, replace, conversions ───────────────────
+
+describe('datetime module - fromisoformat and conversions', () => {
+  test('fromisoformat T separator', async () => {
+    expect(await runPython(`
+from datetime import datetime
+repr(datetime.fromisoformat('2026-06-11T14:30:00'))
+`)).toBe('datetime.datetime(2026, 6, 11, 14, 30)');
+  });
+
+  test('fromisoformat space separator with fraction', async () => {
+    expect(await runPython(`
+from datetime import datetime
+repr(datetime.fromisoformat('2026-06-11 14:30:00.123456'))
+`)).toBe('datetime.datetime(2026, 6, 11, 14, 30, 0, 123456)');
+  });
+
+  test('fromisoformat date-only into datetime', async () => {
+    expect(await runPython(`
+from datetime import datetime
+repr(datetime.fromisoformat('2026-06-11'))
+`)).toBe('datetime.datetime(2026, 6, 11, 0, 0)');
+  });
+
+  test('date.fromisoformat', async () => {
+    expect(await runPython(`
+from datetime import date
+repr(date.fromisoformat('2026-06-11'))
+`)).toBe('datetime.date(2026, 6, 11)');
+  });
+
+  test('fromisoformat invalid string raises ValueError', async () => {
+    await expect(runPython(`
+from datetime import datetime
+datetime.fromisoformat('not-a-date')
+`)).rejects.toThrow("Invalid isoformat string: 'not-a-date'");
+  });
+
+  // Documented deviation: CPython 3.11+ returns aware datetimes for these;
+  // defanged normalizes the instant into the session timezone and stays naive.
+  test('Z suffix normalizes into session timezone', async () => {
+    const interpreter = createInterpreter({ timezone: 'Europe/Berlin' });
+    expect(await interpreter.run(`
+from datetime import datetime
+datetime.fromisoformat('2026-06-11T14:30:00Z').isoformat()
+`)).toBe('2026-06-11T16:30:00');
+  });
+
+  test('offset suffix normalizes into session timezone (default UTC)', async () => {
+    expect(await runPython(`
+from datetime import datetime
+datetime.fromisoformat('2026-06-11T14:30:00+02:00').isoformat()
+`)).toBe('2026-06-11T12:30:00');
+  });
+
+  test('offset-free strings are never reinterpreted by timezone', async () => {
+    const interpreter = createInterpreter({ timezone: 'Asia/Tokyo' });
+    expect(await interpreter.run(`
+from datetime import datetime
+datetime.fromisoformat('2026-06-11T14:30:00').isoformat()
+`)).toBe('2026-06-11T14:30:00');
+  });
+
+  test('replace', async () => {
+    expect(await runPython(`
+from datetime import datetime
+repr(datetime(2026, 6, 11, 14, 30).replace(year=2027, minute=0))
+`)).toBe('datetime.datetime(2027, 6, 11, 14, 0)');
+  });
+
+  test('datetime.date() truncates to date', async () => {
+    expect(await runPython(`
+from datetime import datetime
+repr(datetime(2026, 6, 11, 14, 30).date())
+`)).toBe('datetime.date(2026, 6, 11)');
+  });
+
+  test('weekday()', async () => {
+    expect(await runPython(`
+from datetime import datetime, date
+[datetime(2026, 6, 11).weekday(), date(2026, 6, 11).weekday()]
+`)).toEqual([3, 3]);
+  });
+
+  test('type() names', async () => {
+    expect(await runPython(`
+from datetime import date
+type(date(2026, 1, 1))
+`)).toBe("<class 'datetime.date'>");
+  });
+
+  test('isinstance: datetime is a date subclass', async () => {
+    expect(await runPython(`
+from datetime import datetime, date
+[isinstance(datetime(2026, 1, 1), date), isinstance(date(2026, 1, 1), datetime)]
+`)).toEqual([true, false]);
+  });
+});

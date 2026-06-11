@@ -268,6 +268,25 @@ result = [(i, x, y) for i, (x, y) in enumerate(zip(a, b))]
 len(result)
 `,
   },
+
+  // ── Datetime ────────────────────────────────────────────────────────
+  {
+    name: 'date arithmetic + strftime 1000',
+    category: 'datetime',
+    iterations: 10,
+    code: `
+from datetime import date, timedelta
+start = date(2026, 1, 1)
+labels = []
+latest = start
+for i in range(1000):
+    d = start + timedelta(days=i)
+    if d > latest:
+        latest = d
+    labels.append(d.strftime('%Y-%m'))
+len(labels)
+`,
+  },
 ];
 
 // ── Runner ──────────────────────────────────────────────────────────────

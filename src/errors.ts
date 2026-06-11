@@ -72,6 +72,20 @@ export class StopIteration extends InterpreterError {
   }
 }
 
+export class ImportError extends InterpreterError {
+  constructor(message: string, line: number, column: number) {
+    super(message, line, column);
+    this.name = 'ImportError';
+  }
+}
+
+export class ModuleNotFoundError extends ImportError {
+  constructor(message: string, line: number, column: number) {
+    super(message, line, column);
+    this.name = 'ModuleNotFoundError';
+  }
+}
+
 export class MaxIterationsError extends InterpreterError {
   constructor(line: number, column: number) {
     super('Maximum iterations exceeded (possible infinite loop)', line, column);

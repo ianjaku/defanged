@@ -19,6 +19,7 @@ import {
   PyBuiltin,
   PyKwargs,
   PyGenerator,
+  PyModule,
   Environment,
   pyNumber,
   pyString,
@@ -58,7 +59,18 @@ import {
   ZeroDivisionError,
   StopIteration,
   MaxIterationsError,
+  ImportError,
+  ModuleNotFoundError,
 } from './errors';
+import {
+  createDatetimeModule,
+  getDatetimeAttr,
+  isDatetimeLike,
+  datetimeBinaryOp,
+  datetimeOrdering,
+  negateTimedelta,
+  strftime,
+} from './datetime';
 import { parse } from './parser';
 
 // ── Sync/async plumbing ─────────────────────────────────────────────────────
@@ -149,6 +161,10 @@ export interface InterpreterOptions {
   onChart?: (options: { type: string; data: unknown[]; x: string; y: string | string[]; title?: string }) => void;
   onTable?: (options: { data: unknown[]; columns: Array<{ key: string; label: string; format?: string }>; title?: string }) => void;
   maxIterations?: number;
+  /** Clock used by datetime.now() / date.today(), in epoch milliseconds. Defaults to Date.now. */
+  now?: () => number;
+  /** IANA timezone (e.g. 'Europe/Berlin') the sandboxed code appears to run in. Defaults to 'UTC'. */
+  timezone?: string;
 }
 
 // ── Interpreter ─────────────────────────────────────────────────────────────
@@ -160,12 +176,17 @@ export class Interpreter {
   private maxIterations: number;
   private iterationCount: number = 0;
   private onPrint?: PrintCallback;
+  private modules: Map<string, PyModule>;
 
   constructor(options: InterpreterOptions = {}) {
     this.globals = new Environment();
     this.tools = new Map();
     this.maxIterations = options.maxIterations ?? 5_000_000;
     this.onPrint = options.onPrint;
+    // Validates the timezone eagerly — an invalid IANA name throws here.
+    this.modules = new Map([
+      ['datetime', createDatetimeModule(options.now ?? Date.now, options.timezone ?? 'UTC')],
+    ]);
     this.builtins = createBuiltins({
       onPrint: options.onPrint,
       onChart: options.onChart,
@@ -306,11 +327,36 @@ export class Interpreter {
               case 'IndexError': throw new IndexError(msg, stmt.line, stmt.column);
               case 'ZeroDivisionError': throw new ZeroDivisionError(stmt.line, stmt.column);
               case 'NameError': throw new NameError(msg, stmt.line, stmt.column);
+              case 'ImportError': throw new ImportError(msg, stmt.line, stmt.column);
+              case 'ModuleNotFoundError': throw new ModuleNotFoundError(msg, stmt.line, stmt.column);
               default: throw new InterpreterError(msg, stmt.line, stmt.column);
             }
           }
           throw new InterpreterError(msg, stmt.line, stmt.column);
         });
+
+      case 'Import':
+        for (const { name, alias } of stmt.modules) {
+          const module = this.modules.get(name);
+          if (!module) throw new ModuleNotFoundError(`No module named '${name}'`, stmt.line, stmt.column);
+          env.set(alias ?? name, module);
+        }
+        return pyNone();
+
+      case 'ImportFrom': {
+        const module = this.modules.get(stmt.module);
+        if (!module) throw new ModuleNotFoundError(`No module named '${stmt.module}'`, stmt.line, stmt.column);
+        if (stmt.names === '*') {
+          for (const [name, value] of module.attrs) env.set(name, value);
+        } else {
+          for (const { name, alias } of stmt.names) {
+            const value = module.attrs.get(name);
+            if (!value) throw new ImportError(`cannot import name '${name}' from '${stmt.module}'`, stmt.line, stmt.column);
+            env.set(alias ?? name, value);
+          }
+        }
+        return pyNone();
+      }
 
       case 'Global':
         for (const name of stmt.names) env.declareGlobal(name);
@@ -1196,6 +1242,10 @@ export class Interpreter {
         case '*': return pyNumber(leftVal * rightVal);
       }
     }
+    if (isDatetimeLike(left) || isDatetimeLike(right)) {
+      const result = datetimeBinaryOp(op, left, right, line, column);
+      if (result) return result;
+    }
     throw new TypeError(`unsupported operand type(s) for ${op}: '${left.type}' and '${right.type}'`, line, column);
   }
 
@@ -1203,9 +1253,11 @@ export class Interpreter {
     switch (op) {
       case '-':
         if (isNumber(operand)) return pyNumber(-operand.value);
+        if (operand.type === 'timedelta') return negateTimedelta(operand);
         throw new TypeError(`bad operand type for unary -: '${operand.type}'`, line, column);
       case '+':
         if (isNumber(operand)) return operand;
+        if (operand.type === 'timedelta') return operand;
         throw new TypeError(`bad operand type for unary +: '${operand.type}'`, line, column);
       case '~':
         if (isNumber(operand)) return pyNumber(~Math.trunc(operand.value));
@@ -1236,6 +1288,17 @@ export class Interpreter {
             case '>': return left.value > right.value;
             case '<=': return left.value <= right.value;
             case '>=': return left.value >= right.value;
+          }
+        }
+        if (isDatetimeLike(left) || isDatetimeLike(right)) {
+          const cmp = datetimeOrdering(left, right, line, column);
+          if (cmp !== null) {
+            switch (op) {
+              case '<': return cmp < 0;
+              case '>': return cmp > 0;
+              case '<=': return cmp <= 0;
+              case '>=': return cmp >= 0;
+            }
           }
         }
         throw new TypeError(`'${op}' not supported between '${left.type}' and '${right.type}'`, line, column);
@@ -1955,6 +2018,15 @@ export class Interpreter {
     if (isList(obj)) return getListMethod(obj, attr, line, column);
     if (isDict(obj)) return getDictMethod(obj, attr, line, column);
     if (isSet(obj)) return getSetMethod(obj, attr, line, column);
+    if (isDatetimeLike(obj)) return getDatetimeAttr(obj, attr, line, column);
+    if (obj.type === 'module') {
+      const value = obj.attrs.get(attr);
+      if (value) return value;
+      throw new TypeError(`module '${obj.name}' has no attribute '${attr}'`, line, column);
+    }
+    if (obj.type === 'builtin' && obj.attrs?.has(attr)) {
+      return obj.attrs.get(attr)!;
+    }
     if (obj.type === 'builtin' && obj.name === 'str' && attr === 'maketrans') {
       return {
         type: 'builtin', name: 'str.maketrans',
@@ -2047,7 +2119,9 @@ export class Interpreter {
   private exceptionMatches(error: Error, exceptionTypes: string[] | null): boolean {
     if (exceptionTypes === null) return true;
     const errorTypeMap: Record<string, string[]> = {
-      'Exception': ['TypeError', 'NameError', 'KeyError', 'IndexError', 'ZeroDivisionError', 'ValueError', 'SyntaxError', 'AttributeError', 'StopIteration', 'InterpreterError'],
+      'Exception': ['TypeError', 'NameError', 'KeyError', 'IndexError', 'ZeroDivisionError', 'ValueError', 'SyntaxError', 'AttributeError', 'StopIteration', 'InterpreterError', 'ImportError', 'ModuleNotFoundError'],
+      'ImportError': ['ImportError', 'ModuleNotFoundError'],
+      'ModuleNotFoundError': ['ModuleNotFoundError'],
       'StopIteration': ['StopIteration'],
       'TypeError': ['TypeError'],
       'NameError': ['NameError'],
@@ -2070,6 +2144,14 @@ export class Interpreter {
 // ── Format spec ─────────────────────────────────────────────────────────────
 
 function applyFormatSpec(value: PyValue, spec: string): string {
+  // date/datetime delegate format specs containing % to strftime, like
+  // CPython's __format__.
+  if ((value.type === 'datetime' || value.type === 'date') && spec.includes('%')) {
+    const c = value.type === 'datetime'
+      ? value
+      : { year: value.year, month: value.month, day: value.day, hour: 0, minute: 0, second: 0, microsecond: 0 };
+    return strftime(c, spec);
+  }
   const match = spec.match(/^([<>=^])?(\+|-| )?(#)?(0)?(\d+)?([_,])?(\.(\d+))?([bcdeEfFgGnosxX%])?$/);
   if (!match) return pyStr(value);
   const [, align, , , zero, widthStr, , , precisionStr, typeChar] = match;

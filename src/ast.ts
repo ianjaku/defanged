@@ -326,6 +326,17 @@ export interface Try extends ASTNode {
   finalbody: Statement[];  // finally block
 }
 
+export interface Import extends ASTNode {
+  type: 'Import';
+  modules: Array<{ name: string; alias?: string }>;
+}
+
+export interface ImportFrom extends ASTNode {
+  type: 'ImportFrom';
+  module: string;
+  names: Array<{ name: string; alias?: string }> | '*';
+}
+
 export type Statement =
   | ExpressionStmt
   | Assignment
@@ -343,6 +354,8 @@ export type Statement =
   | Global
   | Nonlocal
   | Del
-  | Assert;
+  | Assert
+  | Import
+  | ImportFrom;
 
 export type Program = Statement[];

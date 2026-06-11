@@ -1,6 +1,6 @@
 # tespy-parser: Feature Support Matrix
 
-A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**649 pass / 0 fail** as of 2026-04-19).
+A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**733 pass / 0 fail** as of 2026-06-11).
 
 Explanations are written for TypeScript developers who may not know Python.
 
@@ -274,6 +274,47 @@ Supported:
 Not yet supported:
 - `gen.send(value)` — sending values into a generator
 - `gen.throw()` / `gen.close()` — generator cleanup protocol
+
+### The `datetime` module
+
+The only importable module. All standard import forms work:
+
+```python
+import datetime
+import datetime as dt
+from datetime import datetime, date, timedelta
+from datetime import datetime as DT
+from datetime import *
+```
+
+Importing anything else raises `ModuleNotFoundError` (catchable with `except ImportError`, as in CPython).
+
+| Feature | Does | TS analogue |
+|---|---|---|
+| `datetime(y, m, d, [h, min, s, us])` | Construct a naive datetime | `new Date(y, m-1, d, ...)` |
+| `date(y, m, d)` | Construct a date | no direct equivalent |
+| `timedelta(days=, hours=, ...)` | A duration; kwargs accept floats | milliseconds number |
+| `datetime.now()` / `date.today()` | Wall-clock time in the session timezone (see below) | `new Date()` |
+| `datetime.utcnow()` | UTC wall-clock time | `new Date()` UTC getters |
+| `datetime.fromisoformat(s)` / `date.fromisoformat(s)` | Parse ISO 8601 | `new Date(s)` |
+| `datetime.strptime(s, fmt)` | Parse with `%Y-%m-%d`-style directives | date library |
+| `d.isoformat()` | ISO 8601 string | `d.toISOString()` |
+| `d.strftime(fmt)` | Format (`%Y %y %m %d %H %M %S %f %I %p %j %a %A %b %B %%`) | date library |
+| `d.year` … `d.microsecond`, `td.days/seconds/microseconds` | Component access | `getFullYear()` etc. |
+| `d.weekday()` | Monday=0 … Sunday=6 | `(getDay() + 6) % 7` |
+| `d.replace(year=..., ...)` | Copy with fields changed | spread + override |
+| `dt.date()` | Truncate datetime to date | no direct equivalent |
+| `td.total_seconds()` | Duration as float seconds | `ms / 1000` |
+| `dt2 - dt1` → `timedelta`, `dt ± td`, `td ± td`, `td * n`, `td / n` | Arithmetic | manual ms math |
+| `<` `<=` `==` etc., `sorted()`, `min()`/`max()` | Comparison and ordering | `getTime()` comparison |
+| `f"{dt:%Y-%m}"` | Format spec delegates to `strftime` | template literal |
+
+**Timezone model.** All datetimes are naive (no `tzinfo`), but the host configures a *session timezone* (`createInterpreter({ timezone: 'Europe/Berlin' })`, default `'UTC'`) and the sandbox behaves as if the Python were running on a computer in that timezone: `now()`/`today()` return its wall-clock time, and `fromisoformat()` converts `Z`/`±HH:MM`-suffixed strings into it (a deviation — CPython 3.11+ would return an aware datetime). Offset-free strings are never reinterpreted. The clock itself is also injectable: `createInterpreter({ now: () => epochMillis })`.
+
+Known limitations:
+- No `tzinfo` / aware datetimes, no `astimezone()`, no `datetime.time` (time-of-day) class, no `fold`.
+- `date`/`datetime` values are not hashable — they can't be dict keys or set members.
+- `datetime.now()` reflects the injected clock and session timezone, not the process-local timezone (CPython uses the machine's local time).
 
 ---
 

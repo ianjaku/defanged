@@ -3,6 +3,7 @@
  */
 
 import { Statement, Expression, Parameter } from './ast';
+import { datetimeRepr, datetimeStr, isoformatDate, isoformatDatetime } from './datetime';
 
 export type PyValue =
   | PyNumber
@@ -17,7 +18,11 @@ export type PyValue =
   | PyBuiltin
   | PyKwargs
   | PyIterator
-  | PyGenerator;
+  | PyGenerator
+  | PyDate
+  | PyDateTime
+  | PyTimeDelta
+  | PyModule;
 
 export interface PyNumber {
   type: 'number';
@@ -75,6 +80,8 @@ export interface PyBuiltin {
   fn: (...args: any[]) => PyValue | Promise<PyValue>;
   /** If true, the last argument will be a kwargs object */
   acceptsKwargs?: boolean;
+  /** Static attributes reachable via dot access (e.g. classmethods like datetime.now) */
+  attrs?: Map<string, PyValue>;
 }
 
 /** Kwargs object passed to builtins that accept keyword arguments */
@@ -95,6 +102,38 @@ export interface PyGenerator {
   started: boolean;
   finished: boolean;
   next: (sendValue?: PyValue) => Promise<{ value: PyValue; done: boolean }>;
+}
+
+export interface PyDate {
+  type: 'date';
+  year: number;
+  month: number;
+  day: number;
+}
+
+export interface PyDateTime {
+  type: 'datetime';
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+  microsecond: number;
+}
+
+/** Normalized like CPython: 0 <= seconds < 86400, 0 <= microseconds < 1e6 */
+export interface PyTimeDelta {
+  type: 'timedelta';
+  days: number;
+  seconds: number;
+  microseconds: number;
+}
+
+export interface PyModule {
+  type: 'module';
+  name: string;
+  attrs: Map<string, PyValue>;
 }
 
 /**
@@ -221,6 +260,18 @@ export function pySet(values?: Set<string | number | boolean>): PySet {
   return { type: 'set', values: values ?? new Set() };
 }
 
+export function pyDate(year: number, month: number, day: number): PyDate {
+  return { type: 'date', year, month, day };
+}
+
+export function pyDatetime(c: { year: number; month: number; day: number; hour: number; minute: number; second: number; microsecond: number }): PyDateTime {
+  return { type: 'datetime', year: c.year, month: c.month, day: c.day, hour: c.hour, minute: c.minute, second: c.second, microsecond: c.microsecond };
+}
+
+export function pyTimedelta(days: number, seconds: number, microseconds: number): PyTimeDelta {
+  return { type: 'timedelta', days, seconds, microseconds };
+}
+
 // ============ Truthiness ============
 
 export function isTruthy(value: PyValue): boolean {
@@ -250,6 +301,12 @@ export function isTruthy(value: PyValue): boolean {
       return true;
     case 'generator':
       return true;
+    case 'date':
+    case 'datetime':
+    case 'module':
+      return true;
+    case 'timedelta':
+      return value.days !== 0 || value.seconds !== 0 || value.microseconds !== 0;
   }
 }
 
@@ -297,6 +354,18 @@ export function isBuiltin(value: PyValue): value is PyBuiltin {
 
 export function isCallable(value: PyValue): value is PyFunction | PyBuiltin {
   return value.type === 'function' || value.type === 'builtin';
+}
+
+export function isDate(value: PyValue): value is PyDate {
+  return value.type === 'date';
+}
+
+export function isDatetime(value: PyValue): value is PyDateTime {
+  return value.type === 'datetime';
+}
+
+export function isTimedelta(value: PyValue): value is PyTimeDelta {
+  return value.type === 'timedelta';
 }
 
 export function isIterable(value: PyValue): value is PyList | PyTuple | PyString | PyDict | PySet | PyIterator | PyGenerator {
@@ -355,6 +424,12 @@ export function pyRepr(value: PyValue): string {
       return `<iterator>`;
     case 'generator':
       return `<generator object ${value.name}>`;
+    case 'date':
+    case 'datetime':
+    case 'timedelta':
+      return datetimeRepr(value);
+    case 'module':
+      return `<module '${value.name}'>`;
   }
 }
 
@@ -362,6 +437,10 @@ export function pyStr(value: PyValue): string {
   switch (value.type) {
     case 'string':
       return value.value;
+    case 'date':
+    case 'datetime':
+    case 'timedelta':
+      return datetimeStr(value);
     default:
       return pyRepr(value);
   }
@@ -435,6 +514,22 @@ export function pyEquals(a: PyValue, b: PyValue): boolean {
       return a === b;
     case 'generator':
       return a === b;
+    case 'date': {
+      const bDate = b as PyDate;
+      return a.year === bDate.year && a.month === bDate.month && a.day === bDate.day;
+    }
+    case 'datetime': {
+      const bDt = b as PyDateTime;
+      return a.year === bDt.year && a.month === bDt.month && a.day === bDt.day &&
+        a.hour === bDt.hour && a.minute === bDt.minute && a.second === bDt.second &&
+        a.microsecond === bDt.microsecond;
+    }
+    case 'timedelta': {
+      const bTd = b as PyTimeDelta;
+      return a.days === bTd.days && a.seconds === bTd.seconds && a.microseconds === bTd.microseconds;
+    }
+    case 'module':
+      return a === b;
   }
 }
 
@@ -505,5 +600,13 @@ export function valueToJs(value: PyValue): any {
       return value.values.map(valueToJs);
     case 'generator':
       return `<generator object ${value.name}>`;
+    case 'date':
+      return isoformatDate(value);
+    case 'datetime':
+      return isoformatDatetime(value);
+    case 'timedelta':
+      return value.days * 86400 + value.seconds + value.microseconds / 1e6;
+    case 'module':
+      return `<module '${value.name}'>`;
   }
 }

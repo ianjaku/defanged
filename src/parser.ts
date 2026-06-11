@@ -57,16 +57,8 @@ export class Parser {
       return null;
     }
 
-    // Check for import statements and give a clear error
-    if (this.check(TokenType.IMPORT) || this.check(TokenType.FROM)) {
-      const token = this.peek();
-      throw new SyntaxError(
-        "Import statements are not supported. All required functions (get_bank_transactions, get_invoices, get_balances, get_expenses) are already available.",
-        token.line,
-        token.column
-      );
-    }
-
+    if (this.check(TokenType.IMPORT)) return this.importStatement();
+    if (this.check(TokenType.FROM)) return this.fromImportStatement();
     if (this.check(TokenType.IF)) return this.ifStatement();
     if (this.check(TokenType.FOR)) return this.forStatement();
     if (this.check(TokenType.WHILE)) return this.whileStatement();
@@ -414,6 +406,56 @@ export class Parser {
       line: token.line,
       column: token.column,
     };
+  }
+
+  /** Dotted module path like `os.path` — kept as one string so the
+   *  whitelist check and error message see the full name. */
+  private dottedName(): string {
+    let name = this.consume(TokenType.IDENTIFIER, 'Expected module name').value as string;
+    while (this.match(TokenType.DOT)) {
+      name += '.' + (this.consume(TokenType.IDENTIFIER, "Expected name after '.'").value as string);
+    }
+    return name;
+  }
+
+  private importStatement(): Statement {
+    const token = this.consume(TokenType.IMPORT, "Expected 'import'");
+    const modules: Array<{ name: string; alias?: string }> = [];
+    do {
+      const name = this.dottedName();
+      let alias: string | undefined;
+      if (this.match(TokenType.AS)) {
+        alias = this.consume(TokenType.IDENTIFIER, "Expected name after 'as'").value as string;
+      }
+      modules.push({ name, alias });
+    } while (this.match(TokenType.COMMA));
+    this.consumeNewline();
+    return { type: 'Import', modules, line: token.line, column: token.column };
+  }
+
+  private fromImportStatement(): Statement {
+    const token = this.consume(TokenType.FROM, "Expected 'from'");
+    const module = this.dottedName();
+    this.consume(TokenType.IMPORT, "Expected 'import' after module name");
+
+    if (this.match(TokenType.STAR)) {
+      this.consumeNewline();
+      return { type: 'ImportFrom', module, names: '*', line: token.line, column: token.column };
+    }
+
+    const parenthesized = this.match(TokenType.LPAREN);
+    const names: Array<{ name: string; alias?: string }> = [];
+    do {
+      const name = this.consume(TokenType.IDENTIFIER, 'Expected name to import').value as string;
+      let alias: string | undefined;
+      if (this.match(TokenType.AS)) {
+        alias = this.consume(TokenType.IDENTIFIER, "Expected name after 'as'").value as string;
+      }
+      names.push({ name, alias });
+    } while (this.match(TokenType.COMMA));
+    if (parenthesized) this.consume(TokenType.RPAREN, "Expected ')'");
+    this.consumeNewline();
+    return { type: 'ImportFrom', module, names, line: token.line, column: token.column };
   }
 
   private raiseStatement(): Statement {

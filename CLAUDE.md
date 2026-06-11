@@ -8,6 +8,8 @@ Guidance for AI assistants working on this repo. Keep it tight.
 
 The contract: **behave like CPython for the supported subset**. When behavior is ambiguous, open a real Python REPL and match what it does.
 
+Scope is defined by exclusion lists, not just feature lists: `FEATURES.md` is the authoritative record of what works, and the README's "Not supported" table records *why* each missing feature is missing (safety vs. deliberately-not-useful, e.g. `class`, `with`, `async`). Don't implement anything in that table without revisiting its rationale. The one intentional CPython deviation — fresh mutable defaults per call — is documented there too; any other divergence is a bug.
+
 ## Pipeline
 
 ```
@@ -15,11 +17,11 @@ src/lexer.ts → src/parser.ts → src/interpreter.ts
     (tokens)      (AST)           (values)
 ```
 
-Supporting files: `src/ast.ts` (node types), `src/values.ts` (runtime values), `src/builtins.ts` (built-ins + string/list/dict methods), `src/errors.ts` (Python-like exceptions), `src/index.ts` (public API).
+Supporting files: `src/tokens.ts` (token types), `src/ast.ts` (node types), `src/values.ts` (runtime values), `src/builtins.ts` (built-in functions), `src/methods.ts` (string/list/dict/set methods), `src/datetime.ts` (the whitelisted `datetime` module), `src/errors.ts` (Python-like exceptions), `src/index.ts` (public API).
 
 ## Non-negotiable rules
 
-1. **Never widen the safety boundary.** No `import`, `exec`, `eval`, `open`, `compile`, `__import__`, filesystem, network, or subprocess. These features don't exist and shouldn't be added. If data needs to come in from the outside, it goes through `ToolDefinition`.
+1. **Never widen the safety boundary.** No `exec`, `eval`, `open`, `compile`, `__import__`, filesystem, network, or subprocess. These features don't exist and shouldn't be added. `import` resolves only against the built-in whitelist of pure-computation modules (currently just `datetime`); never whitelist a module that performs I/O. If data needs to come in from the outside, it goes through `ToolDefinition`.
 2. **Tests are the spec.** `tests/features.test.ts` documents behavioral expectations. Before changing semantics, add or update a test that pins the new behavior.
 3. **Match CPython.** Don't invent Python. If unsure, verify in `python3 -c "..."`.
 4. **Always use Bun** instead of npm
