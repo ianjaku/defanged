@@ -97,7 +97,7 @@ const b = await interpreter.run(codeTwo);
 
 A quick overview — see [`FEATURES.md`](./FEATURES.md) for the authoritative list with TypeScript analogues for every feature.
 
-**Works:** numbers, strings, f-strings (including format specs and nested quotes), booleans (with int arithmetic), `None`, lists, tuples, dicts, sets, comprehensions (list, dict, set), `if`/`elif`/`else`, `for`/`while` (with `else` clauses), `break`/`continue`/`pass`, `try`/`except`/`finally`, `raise`, function definitions with `*args`/`**kwargs` and defaults, closures, lambdas (including as keyword arguments), decorators, generators (`yield`, `yield from`, `next()`), chained assignment (`x = y = 5`), tuple unpacking, chained comparisons (`0 < x < 10`), slicing, `and`/`or`/`not`, bitwise operators, ternary expressions, walrus (`:=`), string/list/dict/set methods, the `datetime` module (`datetime`, `date`, `timedelta` — naive, with a host-configurable clock and session timezone), the `math` module (sqrt, floor/ceil, log family, trig, isclose, `pi`/`inf`/`nan`), the `statistics` module (mean, median, mode, stdev, quantiles), and ~40 built-ins (`len`, `range`, `sum`, `sorted`, `enumerate`, `zip`, `map`, `filter`, `any`, `all`, `print`, `iter`, `next`, `hash`, `id`, etc.).
+**Works:** numbers, strings, raw strings (`r"\d+"`), f-strings (including format specs and nested quotes), booleans (with int arithmetic), `None`, lists, tuples, dicts and sets (keys/members can be any hashable value, including tuples — `totals[(month, org)]` works), set literals and operators (`|`, `&`, `-`, `^`), comprehensions (list, dict, set), `if`/`elif`/`else`, `for`/`while` (with `else` clauses), `break`/`continue`/`pass`, `try`/`except`/`finally`, `raise`, function definitions with `*args`/`**kwargs` and defaults, closures, lambdas (including as keyword arguments), decorators, generators (`yield`, `yield from`, `next()`), chained assignment (`x = y = 5`), tuple unpacking, chained comparisons (`0 < x < 10`), slicing, `and`/`or`/`not`, bitwise operators, ternary expressions, walrus (`:=`), string/list/dict/set methods, the `datetime` module (`datetime`, `date`, `timedelta` — naive, with a host-configurable clock and session timezone), the `math` module (sqrt, floor/ceil, log family, trig, isclose, `pi`/`inf`/`nan`), the `statistics` module (mean, median, mode, stdev, quantiles), and ~40 built-ins (`len`, `range`, `sum`, `sorted`, `enumerate`, `zip`, `map`, `filter`, `any`, `all`, `print`, `iter`, `next`, `hash`, `id`, etc.).
 
 ### Not supported
 
@@ -166,6 +166,8 @@ interface ToolDefinition {
   handler: (...args: any[]) => any | Promise<any>;
 }
 ```
+
+Return values marshal into Python values: arrays → lists, plain objects → dicts, `null`/`undefined` → `None`, and JS `Date` objects → naive `datetime` values in the session timezone (so timestamp columns from database drivers behave like `datetime.now()` output).
 
 ### `generateToolsPrompt(tools)`
 

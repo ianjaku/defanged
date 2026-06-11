@@ -475,3 +475,97 @@ summary
     });
   });
 });
+
+describe('Date Marshalling', () => {
+  test('JS Date marshals to a datetime, not an empty dict', async () => {
+    const interpreter = createInterpreter({
+      tools: [{
+        name: 'get_date',
+        handler: () => new Date('2024-01-15T10:30:00Z'),
+      }],
+    });
+    const result = await interpreter.run(`
+d = get_date()
+[d.year, d.month, d.day, d.hour, d.minute]
+`);
+    expect(result).toEqual([2024, 1, 15, 10, 30]);
+  });
+
+  test('Date nested in records (the postgres timestamp case)', async () => {
+    const interpreter = createInterpreter({
+      tools: [{
+        name: 'fetch_rows',
+        handler: () => [
+          { id: 1, created_at: new Date('2024-01-15T10:30:00Z') },
+          { id: 2, created_at: new Date('2024-03-02T08:00:00Z') },
+        ],
+      }],
+    });
+    const result = await interpreter.run(`
+rows = fetch_rows()
+[r["created_at"].month for r in rows]
+`);
+    expect(result).toEqual([1, 3]);
+  });
+
+  test('marshalled Date respects the session timezone', async () => {
+    const interpreter = createInterpreter({
+      timezone: 'Europe/Berlin',
+      tools: [{
+        name: 'get_date',
+        // Berlin is UTC+1 on this date
+        handler: () => new Date('2024-01-15T10:30:00Z'),
+      }],
+    });
+    const result = await interpreter.run('get_date().hour');
+    expect(result).toBe(11);
+  });
+
+  test('marshalled Date defaults to UTC wall clock', async () => {
+    const interpreter = createInterpreter({
+      tools: [{
+        name: 'get_date',
+        handler: () => new Date('2024-06-15T23:45:00Z'),
+      }],
+    });
+    const result = await interpreter.run('get_date().hour');
+    expect(result).toBe(23);
+  });
+
+  test('Date milliseconds become microseconds', async () => {
+    const interpreter = createInterpreter({
+      tools: [{
+        name: 'get_date',
+        handler: () => new Date('2024-01-15T10:30:00.123Z'),
+      }],
+    });
+    const result = await interpreter.run('get_date().microsecond');
+    expect(result).toBe(123000);
+  });
+
+  test('marshalled Date supports datetime arithmetic and comparison', async () => {
+    const interpreter = createInterpreter({
+      tools: [{
+        name: 'get_date',
+        handler: () => new Date('2024-01-15T10:30:00Z'),
+      }],
+    });
+    const result = await interpreter.run(`
+from datetime import datetime
+d = get_date()
+[d > datetime(2024, 1, 1), (d - datetime(2024, 1, 15)).seconds]
+`);
+    expect(result).toEqual([true, 37800]);
+  });
+
+  test('marshalled Date round-trips out as an ISO string', async () => {
+    const interpreter = createInterpreter({
+      tools: [{
+        name: 'get_date',
+        handler: () => new Date('2024-01-15T10:30:00Z'),
+      }],
+    });
+    const result = await interpreter.run('get_date()');
+    expect(result).toBe('2024-01-15T10:30:00');
+  });
+});

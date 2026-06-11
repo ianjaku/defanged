@@ -16,6 +16,7 @@ import {
 } from './ast';
 import {
   PyValue,
+  PyNumber,
   PyBuiltin,
   PyKwargs,
   PyGenerator,
@@ -46,6 +47,18 @@ import {
   pyRepr,
   jsToValue,
   valueToJs,
+  pyDatetime,
+  pyHashKey,
+  dictGet,
+  dictSet,
+  dictHas,
+  dictDelete,
+  dictKeys,
+  dictPairs,
+  setAdd,
+  setHas,
+  setValues,
+  pySetFromValues,
 } from './values';
 import { createBuiltins, PrintCallback, compareValues } from './builtins';
 import { getStringMethod, getListMethod, getDictMethod, getSetMethod, getHashableItems } from './methods';
@@ -72,6 +85,7 @@ import {
   datetimeOrdering,
   negateTimedelta,
   strftime,
+  makeTzConverter,
 } from './datetime';
 import { mathModule } from './math';
 import { statisticsModule } from './statistics';
@@ -181,12 +195,17 @@ export class Interpreter {
   private iterationCount: number = 0;
   private onPrint?: PrintCallback;
   private modules: Map<string, PyModule>;
+  /** Converts JS Dates from tool results into naive datetimes in the
+   *  session timezone — same wall clock as datetime.now(). */
+  private convertDate: (date: Date) => ReturnType<typeof pyDatetime>;
 
   constructor(options: InterpreterOptions = {}) {
     this.globals = new Environment();
     this.tools = new Map();
     this.maxIterations = options.maxIterations ?? 5_000_000;
     this.onPrint = options.onPrint;
+    const toSessionTz = makeTzConverter(options.timezone ?? 'UTC');
+    this.convertDate = (date) => pyDatetime(toSessionTz(date.getTime()));
     // Validates the timezone eagerly — an invalid IANA name throws here.
     // math/statistics are stateless singletons; only datetime is built per
     // interpreter (it closes over the clock and timezone).
@@ -468,8 +487,7 @@ export class Interpreter {
               if (idx < 0 || idx >= obj.elements.length) throw new IndexError('list assignment index out of range', target.line, target.column);
               obj.elements[idx] = value;
             } else if (isDict(obj)) {
-              if (!isString(index) && !isNumber(index) && !isBoolean(index)) throw new TypeError('unhashable type for dict key', target.line, target.column);
-              obj.entries.set(index.value, value);
+              dictSet(obj, index, value, target.line, target.column);
             } else {
               throw new TypeError(`'${obj.type}' object does not support item assignment`, target.line, target.column);
             }
@@ -479,7 +497,7 @@ export class Interpreter {
       case 'Attribute':
         return $(this.evaluate(target.object, env), obj => {
           if (isDict(obj)) {
-            obj.entries.set(target.attr, value);
+            dictSet(obj, pyString(target.attr), value);
           } else {
             throw new TypeError(`'${obj.type}' object does not support attribute assignment`, target.line, target.column);
           }
@@ -610,9 +628,7 @@ export class Interpreter {
               if (idx < 0 || idx >= obj.elements.length) throw new IndexError('list assignment index out of range', target.line, target.column);
               obj.elements.splice(idx, 1);
             } else if (isDict(obj)) {
-              if (!isString(index) && !isNumber(index) && !isBoolean(index)) throw new TypeError('unhashable type for dict key', target.line, target.column);
-              if (!obj.entries.has(index.value)) throw new KeyError(String(index.value), target.line, target.column);
-              obj.entries.delete(index.value);
+              if (!dictDelete(obj, index, target.line, target.column)) throw new KeyError(pyRepr(index), target.line, target.column);
             } else {
               throw new TypeError(`'${obj.type}' object does not support item deletion`, target.line, target.column);
             }
@@ -660,12 +676,12 @@ export class Interpreter {
                   options[key] = valueToJs(kwargsArg.values[key]);
                 }
                 if (positionalArgs.length === 0) {
-                  return jsToValue(await tool.handler(options));
+                  return jsToValue(await tool.handler(options), this.convertDate);
                 } else {
-                  return jsToValue(await tool.handler(...positionalArgs, options));
+                  return jsToValue(await tool.handler(...positionalArgs, options), this.convertDate);
                 }
               }
-              return jsToValue(await tool.handler(...args.map(valueToJs)));
+              return jsToValue(await tool.handler(...args.map(valueToJs)), this.convertDate);
             },
           };
         }
@@ -735,6 +751,13 @@ export class Interpreter {
 
       case 'Tuple':
         return this.evaluateArray(expr.elements, env, pyTuple);
+
+      case 'Set':
+        return this.evaluateArray(expr.elements, env, els => {
+          const set = pySet();
+          for (const el of els) setAdd(set, el, expr.line, expr.column);
+          return set;
+        });
 
       case 'ListComp':
         return this.evaluateListComp(expr.element, expr.generators, env);
@@ -900,19 +923,19 @@ export class Interpreter {
         if (r instanceof Promise) {
           return r.then(async (dsVal) => {
             if (!isDict(dsVal)) throw new TypeError('argument after ** must be a mapping', expr.line, expr.column);
-            for (const [k, v] of dsVal.entries) kwargs[String(k)] = v;
+            for (const [k, v] of dictPairs(dsVal)) kwargs[pyStr(k)] = v;
             const idx = expr.doubleStarArgs!.indexOf(dsExpr);
             for (let j = idx + 1; j < expr.doubleStarArgs!.length; j++) {
               const r2 = this.evaluate(expr.doubleStarArgs![j], env);
               const dv = r2 instanceof Promise ? await r2 : r2;
               if (!isDict(dv)) throw new TypeError('argument after ** must be a mapping', expr.line, expr.column);
-              for (const [k, v] of dv.entries) kwargs[String(k)] = v;
+              for (const [k, v] of dictPairs(dv)) kwargs[pyStr(k)] = v;
             }
             return this.call(func, args, kwargs, expr.line, expr.column);
           });
         }
         if (!isDict(r)) throw new TypeError('argument after ** must be a mapping', expr.line, expr.column);
-        for (const [k, v] of r.entries) kwargs[String(k)] = v;
+        for (const [k, v] of dictPairs(r)) kwargs[pyStr(k)] = v;
       }
     }
     return this.call(func, args, kwargs, expr.line, expr.column);
@@ -938,45 +961,41 @@ export class Interpreter {
   }
 
   private evaluateDict(expr: Expression & { type: 'Dict' }, env: Environment): MA<PyValue> {
-    const entries = new Map<string | number | boolean, PyValue>();
+    const dict = pyDict();
     for (let i = 0; i < expr.keys.length; i++) {
       const kr = this.evaluate(expr.keys[i], env);
       if (kr instanceof Promise) {
         return kr.then(async (key) => {
-          if (!isString(key) && !isNumber(key) && !isBoolean(key)) throw new TypeError('unhashable type for dict key', expr.line, expr.column);
           const vr = this.evaluate(expr.values[i], env);
           const val = vr instanceof Promise ? await vr : vr;
-          entries.set(key.value, val);
+          dictSet(dict, key, val, expr.line, expr.column);
           for (let j = i + 1; j < expr.keys.length; j++) {
             const kr2 = this.evaluate(expr.keys[j], env);
             const key2 = kr2 instanceof Promise ? await kr2 : kr2;
-            if (!isString(key2) && !isNumber(key2) && !isBoolean(key2)) throw new TypeError('unhashable type for dict key', expr.line, expr.column);
             const vr2 = this.evaluate(expr.values[j], env);
             const val2 = vr2 instanceof Promise ? await vr2 : vr2;
-            entries.set(key2.value, val2);
+            dictSet(dict, key2, val2, expr.line, expr.column);
           }
-          return pyDict(entries);
+          return dict;
         });
       }
       const key = kr;
-      if (!isString(key) && !isNumber(key) && !isBoolean(key)) throw new TypeError('unhashable type for dict key', expr.line, expr.column);
       const vr = this.evaluate(expr.values[i], env);
       if (vr instanceof Promise) {
         return vr.then(async (val) => {
-          entries.set(key.value, val);
+          dictSet(dict, key, val, expr.line, expr.column);
           for (let j = i + 1; j < expr.keys.length; j++) {
             const kr2 = this.evaluate(expr.keys[j], env);
             const key2 = kr2 instanceof Promise ? await kr2 : kr2;
-            if (!isString(key2) && !isNumber(key2) && !isBoolean(key2)) throw new TypeError('unhashable type for dict key', expr.line, expr.column);
             const vr2 = this.evaluate(expr.values[j], env);
-            entries.set(key2.value, vr2 instanceof Promise ? await vr2 : vr2);
+            dictSet(dict, key2, vr2 instanceof Promise ? await vr2 : vr2, expr.line, expr.column);
           }
-          return pyDict(entries);
+          return dict;
         });
       }
-      entries.set(key.value, vr);
+      dictSet(dict, key, vr, expr.line, expr.column);
     }
-    return pyDict(entries);
+    return dict;
   }
 
   private evaluateFString(expr: Expression & { type: 'FString' }, env: Environment): MA<PyValue> {
@@ -1037,27 +1056,25 @@ export class Interpreter {
   }
 
   private evaluateDictComp(keyExpr: Expression, valueExpr: Expression, generators: Comprehension[], env: Environment): MA<PyValue> {
-    const entries = new Map<string | number | boolean, PyValue>();
+    const dict = pyDict();
     const r = this.evaluateComprehension(generators, 0, env, (innerEnv) => {
       return $(this.evaluate(keyExpr, innerEnv), key =>
         $(this.evaluate(valueExpr, innerEnv), value => {
-          if (!isString(key) && !isNumber(key) && !isBoolean(key)) throw new TypeError('unhashable type for dict key', keyExpr.line, keyExpr.column);
-          entries.set(key.value, value);
+          dictSet(dict, key, value, keyExpr.line, keyExpr.column);
         })
       );
     });
-    return $(r, () => pyDict(entries));
+    return $(r, () => dict);
   }
 
   private evaluateSetComp(element: Expression, generators: Comprehension[], env: Environment): MA<PyValue> {
-    const values = new Set<string | number | boolean>();
+    const set = pySet();
     const r = this.evaluateComprehension(generators, 0, env, (innerEnv) => {
       return $(this.evaluate(element, innerEnv), val => {
-        if (!isString(val) && !isNumber(val) && !isBoolean(val)) throw new TypeError(`unhashable type: '${val.type}'`, element.line, element.column);
-        values.add(val.value);
+        setAdd(set, val, element.line, element.column);
       });
     });
-    return $(r, () => pySet(values));
+    return $(r, () => set);
   }
 
   private evaluateGeneratorExp(element: Expression, generators: Comprehension[], env: Environment): MA<PyValue> {
@@ -1252,6 +1269,21 @@ export class Interpreter {
         case '*': return pyNumber(leftVal * rightVal);
       }
     }
+    if (isSet(left) && isSet(right)) {
+      switch (op) {
+        case '|':
+          return pySetFromValues([...setValues(left), ...setValues(right)]);
+        case '&':
+          return pySetFromValues(setValues(left).filter(v => setHas(right, v)));
+        case '-':
+          return pySetFromValues(setValues(left).filter(v => !setHas(right, v)));
+        case '^':
+          return pySetFromValues([
+            ...setValues(left).filter(v => !setHas(right, v)),
+            ...setValues(right).filter(v => !setHas(left, v)),
+          ]);
+      }
+    }
     if (isDatetimeLike(left) || isDatetimeLike(right)) {
       const result = datetimeBinaryOp(op, left, right, line, column);
       if (result) return result;
@@ -1334,12 +1366,10 @@ export class Interpreter {
       return container.value.includes(item.value);
     }
     if (isDict(container)) {
-      if (!isString(item) && !isNumber(item) && !isBoolean(item)) throw new TypeError('unhashable type', line, column);
-      return container.entries.has(item.value);
+      return dictHas(container, item, line, column);
     }
     if (isSet(container)) {
-      if (!isString(item) && !isNumber(item) && !isBoolean(item)) throw new TypeError('unhashable type', line, column);
-      return container.values.has(item.value);
+      return setHas(container, item, line, column);
     }
     throw new TypeError(`argument of type '${container.type}' is not iterable`, line, column);
   }
@@ -1416,11 +1446,11 @@ export class Interpreter {
       funcEnv.set(func.restParam, pyTuple(args.slice(func.params.length)));
     }
     if (func.kwargsParam) {
-      const entries = new Map<string | number | boolean, PyValue>();
+      const dict = pyDict();
       for (const [k, v] of Object.entries(kwargs)) {
-        if (!usedKwargs.has(k)) entries.set(k, v);
+        if (!usedKwargs.has(k)) dictSet(dict, pyString(k), v);
       }
-      funcEnv.set(func.kwargsParam, pyDict(entries));
+      funcEnv.set(func.kwargsParam, dict);
     }
 
     if (containsYield(func.body)) {
@@ -1766,11 +1796,8 @@ export class Interpreter {
           items = (listVal as any).elements;
         }
         else if (isString(iterable)) items = iterable.value.split('').map(c => pyString(c));
-        else if (isDict(iterable)) {
-          items = Array.from(iterable.entries.keys()).map(k =>
-            typeof k === 'string' ? pyString(k) : typeof k === 'number' ? pyNumber(k) : pyBoolean(k as boolean)
-          );
-        }
+        else if (isDict(iterable)) items = dictKeys(iterable);
+        else if (isSet(iterable)) items = setValues(iterable);
         else throw new TypeError(`'${iterable.type}' object is not iterable`, line, column);
         const keyFunc = kwargs.key;
         const reverse = kwargs.reverse?.type === 'boolean' && (kwargs.reverse as any).value;
@@ -1969,9 +1996,8 @@ export class Interpreter {
       return pyString(obj.value[idx]);
     }
     if (isDict(obj)) {
-      if (!isString(index) && !isNumber(index) && !isBoolean(index)) throw new TypeError('unhashable type for dict key', line, column);
-      const value = obj.entries.get(index.value);
-      if (value === undefined) throw new KeyError(String(index.value), line, column);
+      const value = dictGet(obj, index, line, column);
+      if (value === undefined) throw new KeyError(pyStr(index), line, column);
       return value;
     }
     throw new TypeError(`'${obj.type}' object is not subscriptable`, line, column);
@@ -2041,28 +2067,28 @@ export class Interpreter {
       return {
         type: 'builtin', name: 'str.maketrans',
         fn: (x: PyValue, y?: PyValue, z?: PyValue) => {
-          const table = new Map<string | number | boolean, PyValue>();
+          const table = pyDict();
           if (isDict(x) && y === undefined) {
-            for (const [k, v] of x.entries) {
-              const code = typeof k === 'string' ? k.codePointAt(0)! : k as number;
-              table.set(code, v);
+            for (const [k, v] of dictPairs(x)) {
+              const code = isString(k) ? k.value.codePointAt(0)! : (k as PyNumber).value;
+              dictSet(table, pyNumber(code), v);
             }
           } else if (isString(x) && y !== undefined && isString(y)) {
             if (x.value.length !== y.value.length) {
               throw new ValueError('the first two maketrans arguments must have equal length', line, column);
             }
             for (let i = 0; i < x.value.length; i++) {
-              table.set(x.value.codePointAt(i)!, pyString(y.value[i]));
+              dictSet(table, pyNumber(x.value.codePointAt(i)!), pyString(y.value[i]));
             }
             if (z !== undefined && isString(z)) {
               for (const ch of z.value) {
-                table.set(ch.codePointAt(0)!, pyNone());
+                dictSet(table, pyNumber(ch.codePointAt(0)!), pyNone());
               }
             }
           } else {
             throw new TypeError('maketrans() arguments must be str or dict', line, column);
           }
-          return pyDict(table);
+          return table;
         },
       };
     }
@@ -2076,12 +2102,11 @@ export class Interpreter {
           else if (keys.type === 'iterator') items = keys.values;
           else if (isString(keys)) items = keys.value.split('').map((c: string) => pyString(c));
           else throw new TypeError(`'${keys.type}' object is not iterable`, line, column);
-          const entries = new Map<string | number | boolean, PyValue>();
+          const dict = pyDict();
           for (const item of items) {
-            if (!isString(item) && !isNumber(item) && !isBoolean(item)) throw new TypeError('unhashable type', line, column);
-            entries.set(item.value, defaultVal);
+            dictSet(dict, item, defaultVal, line, column);
           }
-          return pyDict(entries);
+          return dict;
         },
       };
     }
@@ -2093,14 +2118,10 @@ export class Interpreter {
     if (value.type === 'iterator') return value.values;
     if (isString(value)) return value.value.split('').map(c => pyString(c));
     if (isDict(value)) {
-      return Array.from(value.entries.keys()).map(k =>
-        typeof k === 'string' ? pyString(k) : typeof k === 'number' ? pyNumber(k) : pyBoolean(k)
-      );
+      return dictKeys(value);
     }
     if (isSet(value)) {
-      return Array.from(value.values).map(v =>
-        typeof v === 'string' ? pyString(v) : typeof v === 'number' ? pyNumber(v) : pyBoolean(v)
-      );
+      return setValues(value);
     }
     throw new TypeError(`'${value.type}' object is not iterable`, line, column);
   }

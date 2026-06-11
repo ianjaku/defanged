@@ -89,10 +89,29 @@ export class Lexer {
       return;
     }
 
-    // F-strings (f"..." or f'...')
-    if (char === 'f' && (this.peekNext() === '"' || this.peekNext() === "'")) {
-      this.fstring();
-      return;
+    // String prefixes: f"...", r"...", rf"..."/fr"..." (case-insensitive)
+    if (char === 'f' || char === 'F' || char === 'r' || char === 'R') {
+      const prefixChar = char === 'f' || char === 'F' ? 'f' : 'r';
+      const next = this.peekNext();
+      if (next === '"' || next === "'") {
+        if (prefixChar === 'f') {
+          this.fstring();
+        } else {
+          this.advance(); // consume 'r'
+          this.string(next, true);
+        }
+        return;
+      }
+      const nextLower = next.toLowerCase();
+      // Two-char prefix: rf"..." or fr"..." — a raw f-string
+      if ((nextLower === 'f' || nextLower === 'r') && nextLower !== prefixChar) {
+        const quote = this.peekAhead(2);
+        if (quote === '"' || quote === "'") {
+          this.advance(); // consume first prefix char; fstring() consumes the second
+          this.fstring(true);
+          return;
+        }
+      }
     }
 
     // Strings
@@ -237,7 +256,7 @@ export class Lexer {
     });
   }
 
-  private string(quote: string): void {
+  private string(quote: string, raw = false): void {
     const startColumn = this.column;
     const startLine = this.line;
     this.advance(); // consume opening quote
@@ -272,18 +291,24 @@ export class Lexer {
         }
       }
 
-      // Handle escape sequences
+      // Handle escape sequences. In raw strings the backslash is kept
+      // literally, but still consumes the next char so r"a\"b" works
+      // (a backslash can't be the last character, like CPython).
       if (this.peek() === '\\') {
         this.advance(); // consume backslash
         const escaped = this.advance();
-        switch (escaped) {
-          case 'n': value += '\n'; break;
-          case 't': value += '\t'; break;
-          case 'r': value += '\r'; break;
-          case '\\': value += '\\'; break;
-          case "'": value += "'"; break;
-          case '"': value += '"'; break;
-          default: value += escaped; break;
+        if (raw) {
+          value += '\\' + escaped;
+        } else {
+          switch (escaped) {
+            case 'n': value += '\n'; break;
+            case 't': value += '\t'; break;
+            case 'r': value += '\r'; break;
+            case '\\': value += '\\'; break;
+            case "'": value += "'"; break;
+            case '"': value += '"'; break;
+            default: value += escaped; break;
+          }
         }
       } else {
         if (this.peek() === '\n') {
@@ -312,11 +337,11 @@ export class Lexer {
     }
   }
 
-  private fstring(): void {
+  private fstring(raw = false): void {
     const startColumn = this.column;
     const startLine = this.line;
-    
-    this.advance(); // consume 'f'
+
+    this.advance(); // consume 'f' (or the second char of an rf/fr prefix)
     const quote = this.advance(); // consume opening quote
     
     // Check for triple-quoted f-string
@@ -442,18 +467,22 @@ export class Lexer {
         continue;
       }
       
-      // Handle escape sequences
+      // Handle escape sequences (kept literal in raw f-strings)
       if (this.peek() === '\\') {
         this.advance();
         const escaped = this.advance();
-        switch (escaped) {
-          case 'n': currentText += '\n'; break;
-          case 't': currentText += '\t'; break;
-          case 'r': currentText += '\r'; break;
-          case '\\': currentText += '\\'; break;
-          case "'": currentText += "'"; break;
-          case '"': currentText += '"'; break;
-          default: currentText += escaped; break;
+        if (raw) {
+          currentText += '\\' + escaped;
+        } else {
+          switch (escaped) {
+            case 'n': currentText += '\n'; break;
+            case 't': currentText += '\t'; break;
+            case 'r': currentText += '\r'; break;
+            case '\\': currentText += '\\'; break;
+            case "'": currentText += "'"; break;
+            case '"': currentText += '"'; break;
+            default: currentText += escaped; break;
+          }
         }
       } else {
         if (this.peek() === '\n') {

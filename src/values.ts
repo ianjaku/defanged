@@ -4,6 +4,7 @@
 
 import { Statement, Expression, Parameter } from './ast';
 import { datetimeRepr, datetimeStr, isoformatDate, isoformatDatetime } from './datetime';
+import { TypeError } from './errors';
 
 export type PyValue =
   | PyNumber
@@ -48,14 +49,23 @@ export interface PyList {
   elements: PyValue[];
 }
 
+/**
+ * Canonical hash key for a hashable PyValue. Not a numeric hash: it is an
+ * injective encoding, so two values map to the same key iff they compare
+ * equal in Python (which is why True/1/1.0 share a key, like CPython).
+ */
+export type PyHashKey = string | number;
+
 export interface PyDict {
   type: 'dict';
-  entries: Map<string | number | boolean, PyValue>;
+  /** hash key → [original key value, mapped value] */
+  entries: Map<PyHashKey, [PyValue, PyValue]>;
 }
 
 export interface PySet {
   type: 'set';
-  values: Set<string | number | boolean>;
+  /** hash key → member value */
+  entries: Map<PyHashKey, PyValue>;
 }
 
 export interface PyTuple {
@@ -244,8 +254,14 @@ export function pyList(elements: PyValue[]): PyList {
   return { type: 'list', elements };
 }
 
-export function pyDict(entries?: Map<string | number | boolean, PyValue>): PyDict {
+export function pyDict(entries?: Map<PyHashKey, [PyValue, PyValue]>): PyDict {
   return { type: 'dict', entries: entries ?? new Map() };
+}
+
+export function pyDictFromPairs(pairs: Iterable<[PyValue, PyValue]>): PyDict {
+  const dict = pyDict();
+  for (const [key, value] of pairs) dictSet(dict, key, value);
+  return dict;
 }
 
 export function pyTuple(elements: PyValue[]): PyTuple {
@@ -256,8 +272,14 @@ export function pyIterator(values: PyValue[]): PyIterator {
   return { type: 'iterator', values, index: 0 };
 }
 
-export function pySet(values?: Set<string | number | boolean>): PySet {
-  return { type: 'set', values: values ?? new Set() };
+export function pySet(): PySet {
+  return { type: 'set', entries: new Map() };
+}
+
+export function pySetFromValues(values: Iterable<PyValue>): PySet {
+  const set = pySet();
+  for (const value of values) setAdd(set, value);
+  return set;
 }
 
 export function pyDate(year: number, month: number, day: number): PyDate {
@@ -270,6 +292,115 @@ export function pyDatetime(c: { year: number; month: number; day: number; hour: 
 
 export function pyTimedelta(days: number, seconds: number, microseconds: number): PyTimeDelta {
   return { type: 'timedelta', days, seconds, microseconds };
+}
+
+// ============ Hashing ============
+
+/**
+ * Encode a hashable value as a Map key. Numbers stay JS numbers (so they can
+ * never collide with the string encodings); booleans collapse onto 1/0 to
+ * match CPython, where True/1/1.0 are the same dict key. String encodings are
+ * prefixed so distinct types can't collide ('\x00' cannot appear in source).
+ * Throws TypeError for unhashable types (list, dict, set, ...).
+ */
+export function pyHashKey(value: PyValue, line = 0, column = 0): PyHashKey {
+  switch (value.type) {
+    case 'number':
+      return value.value;
+    case 'boolean':
+      return value.value ? 1 : 0;
+    case 'string':
+      return 's' + value.value;
+    case 'none':
+      return '\x00None';
+    case 'tuple':
+      // JSON of the element encodings is injective as long as every element
+      // is a string — numbers are tagged because JSON.stringify(Infinity)
+      // is "null" and would conflate inf/nan/None.
+      return '\x00t' + JSON.stringify(value.elements.map((el) => {
+        const k = pyHashKey(el, line, column);
+        return typeof k === 'number' ? '#' + k : k;
+      }));
+    case 'date':
+      return `\x00d${value.year}-${value.month}-${value.day}`;
+    case 'datetime':
+      return `\x00dt${value.year}-${value.month}-${value.day}T${value.hour}:${value.minute}:${value.second}.${value.microsecond}`;
+    case 'timedelta':
+      return `\x00td${value.days}:${value.seconds}:${value.microseconds}`;
+    default:
+      throw new TypeError(`unhashable type: '${value.type}'`, line, column);
+  }
+}
+
+export function isHashable(value: PyValue): boolean {
+  switch (value.type) {
+    case 'number':
+    case 'boolean':
+    case 'string':
+    case 'none':
+    case 'date':
+    case 'datetime':
+    case 'timedelta':
+      return true;
+    case 'tuple':
+      return value.elements.every(isHashable);
+    default:
+      return false;
+  }
+}
+
+// ============ Dict / Set access ============
+
+export function dictGet(dict: PyDict, key: PyValue, line = 0, column = 0): PyValue | undefined {
+  return dict.entries.get(pyHashKey(key, line, column))?.[1];
+}
+
+export function dictSet(dict: PyDict, key: PyValue, value: PyValue, line = 0, column = 0): void {
+  const hk = pyHashKey(key, line, column);
+  const existing = dict.entries.get(hk);
+  if (existing) {
+    // CPython keeps the first-inserted key object and updates the value.
+    existing[1] = value;
+  } else {
+    dict.entries.set(hk, [key, value]);
+  }
+}
+
+export function dictHas(dict: PyDict, key: PyValue, line = 0, column = 0): boolean {
+  return dict.entries.has(pyHashKey(key, line, column));
+}
+
+export function dictDelete(dict: PyDict, key: PyValue, line = 0, column = 0): boolean {
+  return dict.entries.delete(pyHashKey(key, line, column));
+}
+
+export function dictKeys(dict: PyDict): PyValue[] {
+  return Array.from(dict.entries.values(), (e) => e[0]);
+}
+
+export function dictValues(dict: PyDict): PyValue[] {
+  return Array.from(dict.entries.values(), (e) => e[1]);
+}
+
+export function dictPairs(dict: PyDict): [PyValue, PyValue][] {
+  return Array.from(dict.entries.values());
+}
+
+export function setAdd(set: PySet, value: PyValue, line = 0, column = 0): void {
+  const hk = pyHashKey(value, line, column);
+  if (!set.entries.has(hk)) set.entries.set(hk, value);
+}
+
+export function setHas(set: PySet, value: PyValue, line = 0, column = 0): boolean {
+  return set.entries.has(pyHashKey(value, line, column));
+}
+
+export function setDelete(set: PySet, value: PyValue, line = 0, column = 0): boolean {
+  return set.entries.delete(pyHashKey(value, line, column));
+}
+
+export function setValues(set: PySet): PyValue[] {
+  return Array.from(set.entries.values());
 }
 
 // ============ Truthiness ============
@@ -291,7 +422,7 @@ export function isTruthy(value: PyValue): boolean {
     case 'dict':
       return value.entries.size > 0;
     case 'set':
-      return value.values.size > 0;
+      return value.entries.size > 0;
     case 'function':
     case 'builtin':
       return true;
@@ -402,18 +533,16 @@ export function pyRepr(value: PyValue): string {
       }
       return `(${value.elements.map(pyRepr).join(', ')})`;
     case 'dict': {
-      const entries = Array.from(value.entries.entries())
-        .map(([k, v]) => `${typeof k === 'string' ? `'${k}'` : k}: ${pyRepr(v)}`)
+      const entries = Array.from(value.entries.values())
+        .map(([k, v]) => `${pyRepr(k)}: ${pyRepr(v)}`)
         .join(', ');
       return `{${entries}}`;
     }
     case 'set': {
-      if (value.values.size === 0) {
+      if (value.entries.size === 0) {
         return 'set()';
       }
-      const items = Array.from(value.values)
-        .map(v => typeof v === 'string' ? `'${v}'` : String(v))
-        .join(', ');
+      const items = Array.from(value.entries.values()).map(pyRepr).join(', ');
       return `{${items}}`;
     }
     case 'function':
@@ -486,17 +615,17 @@ export function pyEquals(a: PyValue, b: PyValue): boolean {
     case 'dict': {
       const bDict = b as PyDict;
       if (a.entries.size !== bDict.entries.size) return false;
-      for (const [key, value] of a.entries) {
-        const bValue = bDict.entries.get(key);
-        if (bValue === undefined || !pyEquals(value, bValue)) return false;
+      for (const [hk, [, value]] of a.entries) {
+        const bEntry = bDict.entries.get(hk);
+        if (bEntry === undefined || !pyEquals(value, bEntry[1])) return false;
       }
       return true;
     }
     case 'set': {
       const bSet = b as PySet;
-      if (a.values.size !== bSet.values.size) return false;
-      for (const val of a.values) {
-        if (!bSet.values.has(val)) return false;
+      if (a.entries.size !== bSet.entries.size) return false;
+      for (const hk of a.entries.keys()) {
+        if (!bSet.entries.has(hk)) return false;
       }
       return true;
     }
@@ -539,7 +668,21 @@ export function pyEquals(a: PyValue, b: PyValue): boolean {
 
 // ============ Conversion to/from JavaScript ============
 
-export function jsToValue(js: any): PyValue {
+/** Converts a JS Date (an instant) to a naive datetime. Defaults to the UTC
+ *  wall clock; the interpreter passes a converter for the session timezone. */
+export type DateConverter = (date: Date) => PyDateTime;
+
+const utcDateConverter: DateConverter = (date) => pyDatetime({
+  year: date.getUTCFullYear(),
+  month: date.getUTCMonth() + 1,
+  day: date.getUTCDate(),
+  hour: date.getUTCHours(),
+  minute: date.getUTCMinutes(),
+  second: date.getUTCSeconds(),
+  microsecond: date.getUTCMilliseconds() * 1000,
+});
+
+export function jsToValue(js: any, convertDate: DateConverter = utcDateConverter): PyValue {
   if (js === null || js === undefined) {
     return pyNone();
   }
@@ -553,16 +696,33 @@ export function jsToValue(js: any): PyValue {
     return pyBoolean(js);
   }
   if (Array.isArray(js)) {
-    return pyList(js.map(jsToValue));
+    return pyList(js.map((el) => jsToValue(el, convertDate)));
+  }
+  if (js instanceof Date) {
+    return convertDate(js);
   }
   if (typeof js === 'object') {
-    const entries = new Map<string | number | boolean, PyValue>();
+    const dict = pyDict();
     for (const [key, value] of Object.entries(js)) {
-      entries.set(key, jsToValue(value));
+      dictSet(dict, pyString(key), jsToValue(value, convertDate));
     }
-    return pyDict(entries);
+    return dict;
   }
   throw new Error(`Cannot convert JavaScript value to Python: ${typeof js}`);
+}
+
+/** JS object keys are strings; string/number/boolean keys keep their previous
+ *  encoding, anything else (tuples, dates, None) uses its Python repr. */
+function dictKeyToJsKey(key: PyValue): string {
+  switch (key.type) {
+    case 'string':
+      return key.value;
+    case 'number':
+    case 'boolean':
+      return String(key.value);
+    default:
+      return pyRepr(key);
+  }
 }
 
 export function valueToJs(value: PyValue): any {
@@ -581,14 +741,14 @@ export function valueToJs(value: PyValue): any {
       return value.elements.map(valueToJs);
     case 'dict': {
       const obj: Record<string, any> = {};
-      for (const [key, val] of value.entries) {
-        obj[String(key)] = valueToJs(val);
+      for (const [key, val] of value.entries.values()) {
+        obj[dictKeyToJsKey(key)] = valueToJs(val);
       }
       return obj;
     }
     case 'set':
       // Convert set to array for JS interop
-      return Array.from(value.values);
+      return Array.from(value.entries.values(), valueToJs);
     case 'function':
       return `<function ${value.name}>`;
     case 'builtin':

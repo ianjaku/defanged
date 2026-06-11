@@ -372,7 +372,8 @@ export function makeTzConverter(timezone: string): (ms: number) => Components {
     return {
       year: parts.year, month: parts.month, day: parts.day,
       hour: parts.hour, minute: parts.minute, second: parts.second,
-      microsecond: 0,
+      // Sub-second offset of the instant is timezone-independent.
+      microsecond: (((ms % 1000) + 1000) % 1000) * 1000,
     };
   };
   tzConverterCache.set(timezone, converter);

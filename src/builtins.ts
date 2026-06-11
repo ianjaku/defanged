@@ -26,6 +26,16 @@ import {
   pyRepr,
   isTruthy,
   valueToJs,
+  pyHashKey,
+  dictGet,
+  dictSet,
+  dictKeys,
+  dictValues,
+  dictPairs,
+  pyDictFromPairs,
+  pySetFromValues,
+  setAdd,
+  setValues,
 } from './values';
 import { TypeError, ValueError } from './errors';
 import { isDatetimeLike, datetimeOrdering } from './datetime';
@@ -137,12 +147,9 @@ function evaluateKeyExpression(expr: any, paramName: string, paramValue: PyValue
         return obj.elements[idx];
       }
       if (isDict(obj)) {
-        if (!isString(index) && !isNumber(index)) {
-          throw new TypeError('dict key must be string or number', 0, 0);
-        }
-        const val = obj.entries.get(index.value);
+        const val = dictGet(obj, index);
         if (val === undefined) {
-          throw new TypeError(`KeyError: ${index.value}`, 0, 0);
+          throw new TypeError(`KeyError: ${pyRepr(index)}`, 0, 0);
         }
         return val;
       }
@@ -163,7 +170,7 @@ function evaluateKeyExpression(expr: any, paramName: string, paramValue: PyValue
     case 'Attribute': {
       const obj = evaluateKeyExpression(expr.object, paramName, paramValue);
       if (isDict(obj)) {
-        const val = obj.entries.get(expr.attr);
+        const val = dictGet(obj, pyString(expr.attr));
         if (val === undefined) {
           throw new TypeError(`KeyError: ${expr.attr}`, 0, 0);
         }
@@ -221,7 +228,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
       if (isList(obj)) return pyNumber(obj.elements.length);
       if (isTuple(obj)) return pyNumber(obj.elements.length);
       if (isDict(obj)) return pyNumber(obj.entries.size);
-      if (isSet(obj)) return pyNumber(obj.values.size);
+      if (isSet(obj)) return pyNumber(obj.entries.size);
       throw new TypeError(`object of type '${obj.type}' has no len()`, 0, 0);
     },
   });
@@ -321,18 +328,10 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
         return pyList(iterable.value.split('').map(c => pyString(c)));
       }
       if (isDict(iterable)) {
-        return pyList(Array.from(iterable.entries.keys()).map(k =>
-          typeof k === 'string' ? pyString(k) :
-          typeof k === 'number' ? pyNumber(k) :
-          pyBoolean(k as boolean)
-        ));
+        return pyList(dictKeys(iterable));
       }
       if (isSet(iterable)) {
-        return pyList(Array.from(iterable.values).map(v =>
-          typeof v === 'string' ? pyString(v) :
-          typeof v === 'number' ? pyNumber(v) :
-          pyBoolean(v as boolean)
-        ));
+        return pyList(setValues(iterable));
       }
       if (iterable.type === 'iterator') {
         return pyList([...iterable.values]);
@@ -357,18 +356,10 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
         return pyTuple([...iterable.values]);
       }
       if (isDict(iterable)) {
-        return pyTuple(Array.from(iterable.entries.keys()).map(k =>
-          typeof k === 'string' ? pyString(k) :
-          typeof k === 'number' ? pyNumber(k) :
-          pyBoolean(k as boolean)
-        ));
+        return pyTuple(dictKeys(iterable));
       }
       if (isSet(iterable)) {
-        return pyTuple(Array.from(iterable.values).map(v =>
-          typeof v === 'string' ? pyString(v) :
-          typeof v === 'number' ? pyNumber(v) :
-          pyBoolean(v as boolean)
-        ));
+        return pyTuple(setValues(iterable));
       }
       throw new TypeError(`'${iterable.type}' object is not iterable`, 0, 0);
     },
@@ -381,12 +372,12 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
     acceptsKwargs: true,
     fn: (...rawArgs: (PyValue | PyKwargs)[]): PyValue => {
       const { args, kwargs } = extractKwargs(rawArgs);
-      const entries = new Map<string | number | boolean, PyValue>();
+      const dict = pyDict();
       const iterable = args[0];
 
       if (iterable !== undefined) {
         if (isDict(iterable)) {
-          for (const [k, v] of iterable.entries) entries.set(k, v);
+          for (const [k, v] of dictPairs(iterable)) dictSet(dict, k, v);
         } else if (isList(iterable) || isTuple(iterable)) {
           for (const item of iterable.elements) {
             if (!isList(item) && !isTuple(item)) {
@@ -396,10 +387,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
               throw new TypeError(`dictionary update sequence element has length ${item.elements.length}; 2 is required`, 0, 0);
             }
             const [key, value] = item.elements;
-            if (!isString(key) && !isNumber(key)) {
-              throw new TypeError('unhashable type for dict key', 0, 0);
-            }
-            entries.set(key.value, value);
+            dictSet(dict, key, value);
           }
         } else {
           throw new TypeError(`'${iterable.type}' object is not iterable`, 0, 0);
@@ -407,10 +395,10 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
       }
 
       for (const [k, v] of Object.entries(kwargs)) {
-        entries.set(k, v);
+        dictSet(dict, pyString(k), v);
       }
 
-      return pyDict(entries);
+      return dict;
     },
   });
 
@@ -420,45 +408,25 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
     name: 'set',
     fn: (iterable?: PyValue): PyValue => {
       if (iterable === undefined) return pySet();
-      if (isSet(iterable)) return pySet(new Set(iterable.values));
-      
-      const values = new Set<string | number | boolean>();
-      
+      if (isSet(iterable)) return pySetFromValues(setValues(iterable));
+
       if (isList(iterable) || isTuple(iterable)) {
-        for (const item of iterable.elements) {
-          if (!isString(item) && !isNumber(item) && item.type !== 'boolean') {
-            throw new TypeError(`unhashable type: '${item.type}'`, 0, 0);
-          }
-          values.add(item.value);
-        }
-        return pySet(values);
+        return pySetFromValues(iterable.elements);
       }
-      
+
       if (isString(iterable)) {
-        for (const char of iterable.value) {
-          values.add(char);
-        }
-        return pySet(values);
+        return pySetFromValues(iterable.value.split('').map(c => pyString(c)));
       }
-      
+
       if (iterable.type === 'iterator') {
-        for (const item of iterable.values) {
-          if (!isString(item) && !isNumber(item) && item.type !== 'boolean') {
-            throw new TypeError(`unhashable type: '${item.type}'`, 0, 0);
-          }
-          values.add(item.value);
-        }
-        return pySet(values);
+        return pySetFromValues(iterable.values);
       }
-      
+
       if (isDict(iterable)) {
         // Iterating over dict yields keys
-        for (const key of iterable.entries.keys()) {
-          values.add(key);
-        }
-        return pySet(values);
+        return pySetFromValues(dictKeys(iterable));
       }
-      
+
       throw new TypeError(`'${iterable.type}' object is not iterable`, 0, 0);
     },
   });
@@ -782,9 +750,10 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
       if (isList(obj) || isTuple(obj)) return pyIterator([...obj.elements]);
       if (isString(obj)) return pyIterator(obj.value.split('').map(c => pyString(c)));
       if (isDict(obj)) {
-        return pyIterator(Array.from(obj.entries.keys()).map(k =>
-          typeof k === 'string' ? pyString(k) : typeof k === 'number' ? pyNumber(k) : pyBoolean(k as boolean)
-        ));
+        return pyIterator(dictKeys(obj));
+      }
+      if (isSet(obj)) {
+        return pyIterator(setValues(obj));
       }
       throw new TypeError(`'${obj.type}' object is not iterable`, 0, 0);
     },
@@ -813,17 +782,15 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
     type: 'builtin',
     name: 'hash',
     fn: (obj: PyValue): PyValue => {
-      if (isNumber(obj)) return pyNumber(obj.value);
-      if (isString(obj)) {
-        let h = 0;
-        for (let i = 0; i < obj.value.length; i++) {
-          h = ((h << 5) - h + obj.value.charCodeAt(i)) | 0;
-        }
-        return pyNumber(h);
+      // pyHashKey throws for unhashable types; numbers hash to themselves
+      // like CPython ints, everything else gets a string hash.
+      const hk = pyHashKey(obj);
+      if (typeof hk === 'number') return pyNumber(hk);
+      let h = 0;
+      for (let i = 0; i < hk.length; i++) {
+        h = ((h << 5) - h + hk.charCodeAt(i)) | 0;
       }
-      if (obj.type === 'boolean') return pyNumber(obj.value ? 1 : 0);
-      if (obj.type === 'none') return pyNumber(0);
-      throw new TypeError(`unhashable type: '${obj.type}'`, 0, 0);
+      return pyNumber(h);
     },
   });
 
@@ -1025,8 +992,8 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
           throw new TypeError('print_chart() data must be a list of dictionaries', 0, 0);
         }
         const obj: Record<string, unknown> = {};
-        for (const [key, val] of el.entries) {
-          obj[String(key)] = valueToJs(val);
+        for (const [key, val] of dictPairs(el)) {
+          obj[pyStr(key)] = valueToJs(val);
         }
         return obj;
       });
@@ -1076,8 +1043,8 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
           throw new TypeError('print_table() data must be a list of dictionaries', 0, 0);
         }
         const obj: Record<string, unknown> = {};
-        for (const [key, val] of el.entries) {
-          obj[String(key)] = valueToJs(val);
+        for (const [key, val] of dictPairs(el)) {
+          obj[pyStr(key)] = valueToJs(val);
         }
         return obj;
       });
@@ -1099,9 +1066,9 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
           }
           if (isDict(el)) {
             // Full column definition
-            const keyVal = el.entries.get('key');
-            const labelVal = el.entries.get('label');
-            const formatVal = el.entries.get('format');
+            const keyVal = dictGet(el, pyString('key'));
+            const labelVal = dictGet(el, pyString('label'));
+            const formatVal = dictGet(el, pyString('format'));
             if (!keyVal || !isString(keyVal)) {
               throw new TypeError('Column definition requires "key" string', 0, 0);
             }

@@ -1485,9 +1485,19 @@ export class Parser {
       };
     }
 
-    // Set literal: {expr, expr, ...} — but we don't have set literals yet,
-    // so this is an error for now
-    throw new SyntaxError("Expected ':' after dict key or 'for' for set comprehension", startToken.line, startToken.column);
+    // Set literal: {expr, expr, ...}
+    const elements = [firstExpr];
+    while (this.match(TokenType.COMMA)) {
+      if (this.check(TokenType.RBRACE)) break;
+      elements.push(this.expression());
+    }
+    this.consume(TokenType.RBRACE, "Expected '}' after set literal");
+    return {
+      type: 'Set',
+      elements,
+      line: startToken.line,
+      column: startToken.column,
+    };
   }
 
   private comprehensionGenerators(): Comprehension[] {

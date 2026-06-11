@@ -19,6 +19,20 @@ import {
   isTuple,
   pyEquals,
   valueToJs,
+  pyRepr,
+  dictGet,
+  dictSet,
+  dictHas,
+  dictDelete,
+  dictKeys,
+  dictValues,
+  dictPairs,
+  pyDictFromPairs,
+  setAdd,
+  setHas,
+  setDelete,
+  setValues,
+  pySetFromValues,
 } from './values';
 import { TypeError, IndexError, KeyError, ValueError } from './errors';
 import { extractKwargs, compareValues, applyKeyFunction } from './builtins';
@@ -328,7 +342,7 @@ export function getStringMethod(obj: PyValue & { type: 'string' }, attr: string,
         let result = '';
         for (const ch of str) {
           const code = ch.codePointAt(0)!;
-          const mapped = table.entries.get(code);
+          const mapped = dictGet(table, pyNumber(code));
           if (mapped === undefined) {
             result += ch;
           } else if (isNone(mapped)) {
@@ -587,36 +601,29 @@ export function getListMethod(obj: PyValue & { type: 'list' }, attr: string, lin
 }
 
 export function getDictMethod(obj: PyValue & { type: 'dict' }, attr: string, line: number, column: number): PyValue {
-  const dict = obj.entries;
+  const dict = obj;
 
   const methods: Record<string, PyBuiltin> = {
     keys: {
       type: 'builtin',
       name: 'dict.keys',
-      fn: () => pyList(Array.from(dict.keys()).map(k =>
-        typeof k === 'string' ? pyString(k) : typeof k === 'number' ? pyNumber(k) : pyBoolean(k)
-      )),
+      fn: () => pyList(dictKeys(dict)),
     },
     values: {
       type: 'builtin',
       name: 'dict.values',
-      fn: () => pyList(Array.from(dict.values())),
+      fn: () => pyList(dictValues(dict)),
     },
     items: {
       type: 'builtin',
       name: 'dict.items',
-      fn: () => pyList(Array.from(dict.entries()).map(([k, v]) =>
-        pyList([typeof k === 'string' ? pyString(k) : typeof k === 'number' ? pyNumber(k) : pyBoolean(k), v])
-      )),
+      fn: () => pyList(dictPairs(dict).map(([k, v]) => pyList([k, v]))),
     },
     get: {
       type: 'builtin',
       name: 'dict.get',
       fn: (key: PyValue, defaultVal?: PyValue) => {
-        if (!isString(key) && !isNumber(key) && !isBoolean(key)) {
-          throw new TypeError('unhashable type', line, column);
-        }
-        const value = dict.get(key.value);
+        const value = dictGet(dict, key, line, column);
         if (value === undefined || (defaultVal !== undefined && isNone(value))) {
           return defaultVal ?? pyNone();
         }
@@ -627,16 +634,13 @@ export function getDictMethod(obj: PyValue & { type: 'dict' }, attr: string, lin
       type: 'builtin',
       name: 'dict.pop',
       fn: (key: PyValue, defaultVal?: PyValue) => {
-        if (!isString(key) && !isNumber(key) && !isBoolean(key)) {
-          throw new TypeError('unhashable type', line, column);
-        }
-        const value = dict.get(key.value);
+        const value = dictGet(dict, key, line, column);
         if (value !== undefined) {
-          dict.delete(key.value);
+          dictDelete(dict, key);
           return value;
         }
         if (defaultVal !== undefined) return defaultVal;
-        throw new KeyError(String(key.value), line, column);
+        throw new KeyError(pyRepr(key), line, column);
       },
     },
     update: {
@@ -644,8 +648,8 @@ export function getDictMethod(obj: PyValue & { type: 'dict' }, attr: string, lin
       name: 'dict.update',
       fn: (other: PyValue) => {
         if (isDict(other)) {
-          for (const [k, v] of other.entries) {
-            dict.set(k, v);
+          for (const [k, v] of dictPairs(other)) {
+            dictSet(dict, k, v);
           }
         } else {
           throw new TypeError(`'${other.type}' object is not a mapping`, line, column);
@@ -657,41 +661,34 @@ export function getDictMethod(obj: PyValue & { type: 'dict' }, attr: string, lin
       type: 'builtin',
       name: 'dict.popitem',
       fn: () => {
-        if (dict.size === 0) throw new KeyError('popitem(): dictionary is empty', line, column);
-        const keys = Array.from(dict.keys());
-        const lastKey = keys[keys.length - 1];
-        const val = dict.get(lastKey)!;
-        dict.delete(lastKey);
-        const keyVal = typeof lastKey === 'string' ? pyString(lastKey) :
-                       typeof lastKey === 'number' ? pyNumber(lastKey) :
-                       pyBoolean(lastKey);
-        return pyList([keyVal, val]);
+        if (dict.entries.size === 0) throw new KeyError('popitem(): dictionary is empty', line, column);
+        const pairs = dictPairs(dict);
+        const [lastKey, val] = pairs[pairs.length - 1];
+        dictDelete(dict, lastKey);
+        return pyList([lastKey, val]);
       },
     },
     clear: {
       type: 'builtin',
       name: 'dict.clear',
       fn: () => {
-        dict.clear();
+        dict.entries.clear();
         return pyNone();
       },
     },
     copy: {
       type: 'builtin',
       name: 'dict.copy',
-      fn: () => pyDict(new Map(dict)),
+      fn: () => pyDictFromPairs(dictPairs(dict)),
     },
     setdefault: {
       type: 'builtin',
       name: 'dict.setdefault',
       fn: (key: PyValue, defaultVal?: PyValue) => {
-        if (!isString(key) && !isNumber(key) && !isBoolean(key)) {
-          throw new TypeError('unhashable type', line, column);
+        if (!dictHas(dict, key, line, column)) {
+          dictSet(dict, key, defaultVal ?? pyNone());
         }
-        if (!dict.has(key.value)) {
-          dict.set(key.value, defaultVal ?? pyNone());
-        }
-        return dict.get(key.value)!;
+        return dictGet(dict, key)!;
       },
     },
   };
@@ -704,17 +701,14 @@ export function getDictMethod(obj: PyValue & { type: 'dict' }, attr: string, lin
 }
 
 export function getSetMethod(obj: PyValue & { type: 'set' }, attr: string, line: number, column: number): PyValue {
-  const set = obj.values;
+  const set = obj;
 
   const methods: Record<string, PyBuiltin> = {
     add: {
       type: 'builtin',
       name: 'set.add',
       fn: (item: PyValue) => {
-        if (!isString(item) && !isNumber(item) && item.type !== 'boolean') {
-          throw new TypeError(`unhashable type: '${item.type}'`, line, column);
-        }
-        set.add(item.value);
+        setAdd(set, item, line, column);
         return pyNone();
       },
     },
@@ -722,13 +716,9 @@ export function getSetMethod(obj: PyValue & { type: 'set' }, attr: string, line:
       type: 'builtin',
       name: 'set.remove',
       fn: (item: PyValue) => {
-        if (!isString(item) && !isNumber(item) && item.type !== 'boolean') {
-          throw new TypeError(`unhashable type: '${item.type}'`, line, column);
+        if (!setDelete(set, item, line, column)) {
+          throw new KeyError(pyRepr(item), line, column);
         }
-        if (!set.has(item.value)) {
-          throw new KeyError(String(item.value), line, column);
-        }
-        set.delete(item.value);
         return pyNone();
       },
     },
@@ -736,10 +726,7 @@ export function getSetMethod(obj: PyValue & { type: 'set' }, attr: string, line:
       type: 'builtin',
       name: 'set.discard',
       fn: (item: PyValue) => {
-        if (!isString(item) && !isNumber(item) && item.type !== 'boolean') {
-          throw new TypeError(`unhashable type: '${item.type}'`, line, column);
-        }
-        set.delete(item.value);
+        setDelete(set, item, line, column);
         return pyNone();
       },
     },
@@ -747,36 +734,33 @@ export function getSetMethod(obj: PyValue & { type: 'set' }, attr: string, line:
       type: 'builtin',
       name: 'set.pop',
       fn: () => {
-        if (set.size === 0) {
+        if (set.entries.size === 0) {
           throw new KeyError('pop from an empty set', line, column);
         }
-        const first = set.values().next().value as string | number | boolean;
-        set.delete(first);
-        return typeof first === 'string' ? pyString(first) :
-               typeof first === 'number' ? pyNumber(first) :
-               pyBoolean(first);
+        const [hk, first] = set.entries.entries().next().value as [string | number, PyValue];
+        set.entries.delete(hk);
+        return first;
       },
     },
     clear: {
       type: 'builtin',
       name: 'set.clear',
       fn: () => {
-        set.clear();
+        set.entries.clear();
         return pyNone();
       },
     },
     copy: {
       type: 'builtin',
       name: 'set.copy',
-      fn: () => pySet(new Set(set)),
+      fn: () => pySetFromValues(setValues(set)),
     },
     update: {
       type: 'builtin',
       name: 'set.update',
       fn: (other: PyValue) => {
-        const items = getHashableItems(other, line, column);
-        for (const item of items) {
-          set.add(item);
+        for (const item of getHashableItems(other, line, column)) {
+          setAdd(set, item, line, column);
         }
         return pyNone();
       },
@@ -785,98 +769,62 @@ export function getSetMethod(obj: PyValue & { type: 'set' }, attr: string, line:
       type: 'builtin',
       name: 'set.union',
       fn: (other: PyValue) => {
-        const result = new Set(set);
-        const items = getHashableItems(other, line, column);
-        for (const item of items) {
-          result.add(item);
+        const result = pySetFromValues(setValues(set));
+        for (const item of getHashableItems(other, line, column)) {
+          setAdd(result, item, line, column);
         }
-        return pySet(result);
+        return result;
       },
     },
     intersection: {
       type: 'builtin',
       name: 'set.intersection',
       fn: (other: PyValue) => {
-        const otherItems = new Set(getHashableItems(other, line, column));
-        const result = new Set<string | number | boolean>();
-        for (const item of set) {
-          if (otherItems.has(item)) {
-            result.add(item);
-          }
-        }
-        return pySet(result);
+        const otherSet = pySetFromValues(getHashableItems(other, line, column));
+        return pySetFromValues(setValues(set).filter(item => setHas(otherSet, item)));
       },
     },
     difference: {
       type: 'builtin',
       name: 'set.difference',
       fn: (other: PyValue) => {
-        const otherItems = new Set(getHashableItems(other, line, column));
-        const result = new Set<string | number | boolean>();
-        for (const item of set) {
-          if (!otherItems.has(item)) {
-            result.add(item);
-          }
-        }
-        return pySet(result);
+        const otherSet = pySetFromValues(getHashableItems(other, line, column));
+        return pySetFromValues(setValues(set).filter(item => !setHas(otherSet, item)));
       },
     },
     symmetric_difference: {
       type: 'builtin',
       name: 'set.symmetric_difference',
       fn: (other: PyValue) => {
-        const otherItems = new Set(getHashableItems(other, line, column));
-        const result = new Set<string | number | boolean>();
-        for (const item of set) {
-          if (!otherItems.has(item)) {
-            result.add(item);
-          }
+        const otherSet = pySetFromValues(getHashableItems(other, line, column));
+        const result = pySetFromValues(setValues(set).filter(item => !setHas(otherSet, item)));
+        for (const item of setValues(otherSet)) {
+          if (!setHas(set, item)) setAdd(result, item);
         }
-        for (const item of otherItems) {
-          if (!set.has(item)) {
-            result.add(item);
-          }
-        }
-        return pySet(result);
+        return result;
       },
     },
     issubset: {
       type: 'builtin',
       name: 'set.issubset',
       fn: (other: PyValue) => {
-        const otherItems = new Set(getHashableItems(other, line, column));
-        for (const item of set) {
-          if (!otherItems.has(item)) {
-            return pyBoolean(false);
-          }
-        }
-        return pyBoolean(true);
+        const otherSet = pySetFromValues(getHashableItems(other, line, column));
+        return pyBoolean(setValues(set).every(item => setHas(otherSet, item)));
       },
     },
     issuperset: {
       type: 'builtin',
       name: 'set.issuperset',
       fn: (other: PyValue) => {
-        const otherItems = getHashableItems(other, line, column);
-        for (const item of otherItems) {
-          if (!set.has(item)) {
-            return pyBoolean(false);
-          }
-        }
-        return pyBoolean(true);
+        return pyBoolean(getHashableItems(other, line, column).every(item => setHas(set, item)));
       },
     },
     isdisjoint: {
       type: 'builtin',
       name: 'set.isdisjoint',
       fn: (other: PyValue) => {
-        const otherItems = new Set(getHashableItems(other, line, column));
-        for (const item of set) {
-          if (otherItems.has(item)) {
-            return pyBoolean(false);
-          }
-        }
-        return pyBoolean(true);
+        const otherSet = pySetFromValues(getHashableItems(other, line, column));
+        return pyBoolean(!setValues(set).some(item => setHas(otherSet, item)));
       },
     },
   };
@@ -888,39 +836,27 @@ export function getSetMethod(obj: PyValue & { type: 'set' }, attr: string, line:
   throw new TypeError(`'set' object has no attribute '${attr}'`, line, column);
 }
 
-export function getHashableItems(value: PyValue, line: number, column: number): (string | number | boolean)[] {
-  const result: (string | number | boolean)[] = [];
-
+/** Elements of an iterable used in set operations. Hashability is enforced
+ *  when the elements are inserted into a set (setAdd / pyHashKey). */
+export function getHashableItems(value: PyValue, line: number, column: number): PyValue[] {
   if (isSet(value)) {
-    return Array.from(value.values);
+    return setValues(value);
   }
 
   if (isList(value) || isTuple(value)) {
-    for (const item of value.elements) {
-      if (!isString(item) && !isNumber(item) && item.type !== 'boolean') {
-        throw new TypeError(`unhashable type: '${item.type}'`, line, column);
-      }
-      result.push(item.value);
-    }
-    return result;
+    return value.elements;
   }
 
   if (isString(value)) {
-    return value.value.split('');
+    return value.value.split('').map(c => pyString(c));
   }
 
   if (value.type === 'iterator') {
-    for (const item of value.values) {
-      if (!isString(item) && !isNumber(item) && item.type !== 'boolean') {
-        throw new TypeError(`unhashable type: '${item.type}'`, line, column);
-      }
-      result.push(item.value);
-    }
-    return result;
+    return value.values;
   }
 
   if (isDict(value)) {
-    return Array.from(value.entries.keys());
+    return dictKeys(value);
   }
 
   throw new TypeError(`'${value.type}' object is not iterable`, line, column);

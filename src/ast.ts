@@ -106,6 +106,11 @@ export interface Tuple extends ASTNode {
   elements: Expression[];
 }
 
+export interface SetLiteral extends ASTNode {
+  type: 'Set';
+  elements: Expression[];
+}
+
 export interface ListComp extends ASTNode {
   type: 'ListComp';
   element: Expression;
@@ -199,6 +204,7 @@ export type Expression =
   | List
   | Dict
   | Tuple
+  | SetLiteral
   | ListComp
   | DictComp
   | SetComp

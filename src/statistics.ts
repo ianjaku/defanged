@@ -20,6 +20,7 @@ import {
   isList,
   isTuple,
   isSet,
+  setValues,
 } from './values';
 import { extractKwargs } from './builtins';
 import { TypeError, ValueError, StatisticsError } from './errors';
@@ -29,9 +30,7 @@ function iterableElements(data: PyValue, caller: string): PyValue[] {
   if (isList(data) || isTuple(data)) return data.elements;
   if (data.type === 'iterator') return data.values;
   if (isSet(data)) {
-    return Array.from(data.values).map(v =>
-      typeof v === 'string' ? pyString(v) : typeof v === 'number' ? pyNumber(v) : { type: 'boolean' as const, value: v }
-    );
+    return setValues(data);
   }
   throw new TypeError(`${caller}: '${data.type}' object is not iterable`, 0, 0);
 }

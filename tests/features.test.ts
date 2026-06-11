@@ -3348,3 +3348,307 @@ describe('statistics module - quantiles', () => {
     await expect(runPython(`import statistics\nstatistics.quantiles([1, 2, 3], method='nearest')`)).rejects.toThrow("Unknown method: 'nearest'");
   });
 });
+
+// ─── Hashable dict keys: tuples, None, dates ─────────────────────────────────
+// Expected values in this section were verified against CPython 3.13.
+
+describe('Tuple and other hashable dict keys', () => {
+  test('tuple key: subscript set and get', async () => {
+    expect(await runPython(`
+totals = {}
+totals[("jan", "acme")] = 5
+totals[("jan", "acme")]
+`)).toBe(5);
+  });
+
+  test('multi-dimension group-by idiom with .get default', async () => {
+    expect(await runPython(`
+rows = [
+    {"month": "jan", "org": "acme", "amount": 10},
+    {"month": "jan", "org": "acme", "amount": 5},
+    {"month": "feb", "org": "acme", "amount": 7},
+]
+totals = {}
+for r in rows:
+    key = (r["month"], r["org"])
+    totals[key] = totals.get(key, 0) + r["amount"]
+[totals[("jan", "acme")], totals[("feb", "acme")]]
+`)).toEqual([15, 7]);
+  });
+
+  test('dict literal with tuple keys', async () => {
+    expect(await runPython(`
+d = {(1, 2): "a", (3, 4): "b"}
+d[(3, 4)]
+`)).toBe('b');
+  });
+
+  test('tuple keys compare by value, not identity', async () => {
+    expect(await runPython(`
+d = {}
+k1 = ("a", 1)
+d[k1] = "found"
+k2 = ("a", 1)
+d[k2]
+`)).toBe('found');
+  });
+
+  test('numeric equivalence: (1, 2) and (1.0, 2) are the same key', async () => {
+    expect(await runPython(`
+d = {(1, 2): "x"}
+d[(1.0, 2)]
+`)).toBe('x');
+  });
+
+  test('.get with tuple key hit and miss', async () => {
+    expect(await runPython(`
+d = {("jan", "acme"): 5}
+[d.get(("jan", "acme"), 0), d.get(("feb", "x"), 0)]
+`)).toEqual([5, 0]);
+  });
+
+  test('.setdefault with tuple key', async () => {
+    expect(await runPython(`
+d = {}
+d.setdefault(("a", 1), []).append(10)
+d.setdefault(("a", 1), []).append(20)
+d[("a", 1)]
+`)).toEqual([10, 20]);
+  });
+
+  test('.pop with tuple key', async () => {
+    expect(await runPython(`
+d = {("jan", "acme"): 5}
+v = d.pop(("jan", "acme"))
+[v, len(d)]
+`)).toEqual([5, 0]);
+  });
+
+  test('in / not in with tuple keys', async () => {
+    expect(await runPython(`
+d = {("jan", "acme"): 5}
+[("jan", "acme") in d, ("feb", "x") in d, ("feb", "x") not in d]
+`)).toEqual([true, false, true]);
+  });
+
+  test('del with tuple key', async () => {
+    expect(await runPython(`
+d = {(1, 2): "a", (3, 4): "b"}
+del d[(1, 2)]
+[len(d), (1, 2) in d]
+`)).toEqual([1, false]);
+  });
+
+  test('keys() and items() return tuple keys', async () => {
+    expect(await runPython(`
+d = {("jan", "acme"): 5}
+[list(d.keys()), list(d.items())]
+`)).toEqual([[['jan', 'acme']], [[['jan', 'acme'], 5]]]);
+  });
+
+  test('iterating a dict yields tuple keys', async () => {
+    expect(await runPython(`
+d = {("a", 1): "x", ("b", 2): "y"}
+result = []
+for k in d:
+    result.append(k[0])
+result
+`)).toEqual(['a', 'b']);
+  });
+
+  test('dict comprehension with tuple keys', async () => {
+    expect(await runPython(`
+d = {(x, x * 2): x for x in range(3)}
+d[(2, 4)]
+`)).toBe(2);
+  });
+
+  test('nested tuple keys', async () => {
+    expect(await runPython(`
+d = {((1, 2), 3): "deep"}
+d[((1, 2), 3)]
+`)).toBe('deep');
+  });
+
+  test('None as dict key', async () => {
+    expect(await runPython(`
+d = {None: "nothing"}
+d[None]
+`)).toBe('nothing');
+  });
+
+  test('date as dict key', async () => {
+    expect(await runPython(`
+from datetime import date
+d = {date(2024, 1, 15): "meeting"}
+d[date(2024, 1, 15)]
+`)).toBe('meeting');
+  });
+
+  test('datetime as dict key', async () => {
+    expect(await runPython(`
+from datetime import datetime
+d = {datetime(2024, 1, 15, 10, 30): "call"}
+d[datetime(2024, 1, 15, 10, 30)]
+`)).toBe('call');
+  });
+
+  test('True and 1 and 1.0 are the same dict key (CPython semantics)', async () => {
+    expect(await runPython(`
+d = {True: "a", 1: "b", 1.0: "c"}
+[len(d), d[True], d[1]]
+`)).toEqual([1, 'c', 'c']);
+  });
+
+  test('list as dict key raises TypeError', async () => {
+    await expect(runPython(`d = {}\nd[[1, 2]] = "x"`)).rejects.toThrow("unhashable type: 'list'");
+  });
+
+  test('dict as dict key raises TypeError', async () => {
+    await expect(runPython(`d = {}\nd[{"a": 1}] = "x"`)).rejects.toThrow("unhashable type: 'dict'");
+  });
+
+  test('tuple containing a list is unhashable', async () => {
+    await expect(runPython(`d = {(1, [2]): "x"}`)).rejects.toThrow("unhashable type: 'list'");
+  });
+
+  test('dict equality with tuple keys', async () => {
+    expect(await runPython(`{(1, 2): "a"} == {(1, 2): "a"}`)).toBe(true);
+    expect(await runPython(`{(1, 2): "a"} == {(1, 3): "a"}`)).toBe(false);
+  });
+
+  test('mixed key types in one dict', async () => {
+    expect(await runPython(`
+d = {"name": "x", 1: "one", (1, 2): "pair", None: "none"}
+[d["name"], d[1], d[(1, 2)], d[None], len(d)]
+`)).toEqual(['x', 'one', 'pair', 'none', 4]);
+  });
+});
+
+// ─── Set literals and tuples in sets ─────────────────────────────────────────
+
+describe('Set literals and tuples in sets', () => {
+  test('basic set literal', async () => {
+    expect(await runPython(`sorted({3, 1, 2})`)).toEqual([1, 2, 3]);
+  });
+
+  test('singleton set literal', async () => {
+    expect(await runPython(`len({5})`)).toBe(1);
+  });
+
+  test('set literal deduplicates', async () => {
+    expect(await runPython(`len({1, 2, 2, 1})`)).toBe(2);
+  });
+
+  test('set literal with trailing comma', async () => {
+    expect(await runPython(`len({1, 2,})`)).toBe(2);
+  });
+
+  test('tuple in set literal', async () => {
+    expect(await runPython(`
+s = {(1, 2), (3, 4)}
+[(1, 2) in s, (5, 6) in s, len(s)]
+`)).toEqual([true, false, 2]);
+  });
+
+  test('set.add with tuple deduplicates equal tuples', async () => {
+    expect(await runPython(`
+s = set()
+s.add((1, 2))
+s.add((1, 2))
+s.add((3, 4))
+len(s)
+`)).toBe(2);
+  });
+
+  test('set() over a list of tuples', async () => {
+    expect(await runPython(`len(set([(1, 2), (1, 2), (3, 4)]))`)).toBe(2);
+  });
+
+  test('set comprehension producing tuples', async () => {
+    expect(await runPython(`
+s = {(x, x * 2) for x in range(3)}
+(2, 4) in s
+`)).toBe(true);
+  });
+
+  test('set operations with tuple members', async () => {
+    expect(await runPython(`
+a = {(1, 2), (3, 4)}
+b = {(3, 4), (5, 6)}
+[len(a | b), len(a & b), len(a - b)]
+`)).toEqual([3, 1, 1]);
+  });
+
+  test('unhashable element in set literal raises TypeError', async () => {
+    await expect(runPython(`{[1, 2]}`)).rejects.toThrow("unhashable type: 'list'");
+  });
+
+  test('set literal is distinct from dict literal', async () => {
+    expect(await runPython(`
+s = {1, 2}
+d = {1: 2}
+[len(s), len(d), 2 in s, 2 in d]
+`)).toEqual([2, 1, true, false]);
+  });
+});
+
+// ─── Raw strings ─────────────────────────────────────────────────────────────
+
+describe('Raw strings', () => {
+  test('r"\\d+" keeps the backslash', async () => {
+    expect(await runPython(String.raw`r"\d+"`)).toBe(String.raw`\d+`);
+  });
+
+  test('len(r"\\d+") is 3', async () => {
+    expect(await runPython(String.raw`len(r"\d+")`)).toBe(3);
+  });
+
+  test("r'\\n' is backslash-n, not newline", async () => {
+    expect(await runPython(String.raw`[r'\n', len(r'\n')]`)).toEqual(['\\n', 2]);
+  });
+
+  test('uppercase R prefix', async () => {
+    expect(await runPython(String.raw`R"\t"`)).toBe('\\t');
+  });
+
+  test('raw string with escaped quote keeps the backslash', async () => {
+    // CPython: r"a\"b" is the 4-char string a \ " b
+    expect(await runPython(String.raw`len(r"a\"b")`)).toBe(4);
+  });
+
+  test('raw string assigned and reused', async () => {
+    expect(await runPython(String.raw`
+pattern = r"\d{4}-\d{2}"
+pattern
+`)).toBe(String.raw`\d{4}-\d{2}`);
+  });
+
+  test('raw f-string rf"..." keeps backslashes and interpolates', async () => {
+    expect(await runPython(String.raw`rf"\d{1 + 1}"`)).toBe(String.raw`\d2`);
+  });
+
+  test('raw f-string fr"..." prefix order also works', async () => {
+    expect(await runPython(String.raw`fr"\w{2 * 2}"`)).toBe(String.raw`\w4`);
+  });
+
+  test('raw triple-quoted string', async () => {
+    expect(await runPython(String.raw`r"""\d+"""`)).toBe(String.raw`\d+`);
+  });
+
+  test('normal strings still process escapes', async () => {
+    expect(await runPython(String.raw`len("\n")`)).toBe(1);
+  });
+
+  test('identifier starting with r is not a raw string', async () => {
+    expect(await runPython(`r = 5\nr + 1`)).toBe(6);
+  });
+
+  test('identifier starting with f or r followed by call still works', async () => {
+    expect(await runPython(`
+def rf(x):
+    return x * 2
+rf(21)
+`)).toBe(42);
+  });
+});

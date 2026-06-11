@@ -1,6 +1,6 @@
 # tespy-parser: Feature Support Matrix
 
-A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**796 pass / 0 fail** as of 2026-06-11).
+A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**849 pass / 0 fail** as of 2026-06-11).
 
 Explanations are written for TypeScript developers who may not know Python.
 
@@ -141,6 +141,15 @@ dict.fromkeys(["a","b"], 0) # {"a": 0, "b": 0} — static constructor
 ```
 Dict comprehensions (`{k: v for k, v in items}`) also work.
 
+Keys can be any hashable value — strings, numbers, booleans, `None`, dates, and tuples of hashables (the multi-dimension group-by idiom):
+```python
+totals = {}
+for r in rows:
+    key = (r["month"], r["org"])      # tuple key
+    totals[key] = totals.get(key, 0) + r["amount"]
+```
+Like CPython, `True`/`1`/`1.0` are the same key, and unhashable keys (lists, dicts, sets) raise `TypeError: unhashable type`. In TS terms a tuple key is a composite `Map` key, which plain objects/Maps can't do by value.
+
 ### Functions
 - Definitions: `def f(a, b): ...`
 - Default arguments: `def f(a, b=10)`
@@ -180,16 +189,27 @@ f"{[x for x in range(3)]}"        # "[0, 1, 2]"
 F-strings are like TS template literals (`` `hello ${name}` ``), but use `{...}` instead of `${...}`.
 
 ### Sets
-`set([1, 1, 2])` → `{1, 2}` works. Set-literal comprehensions also work:
+Set literals, `set()`, comprehensions, methods, and operators all work:
 ```python
-{x for x in range(3)}          # {0, 1, 2}
-{x for x in [1, 1, 2]}         # {1, 2} (deduplicates)
-{x for x in range(10) if x > 5}  # {6, 7, 8, 9} (with condition)
+{1, 2, 2}                      # {1, 2} — set literal (deduplicates)
+{(1, 2), (3, 4)}               # tuples are valid members
+set([1, 1, 2])                 # {1, 2}
+{x for x in range(10) if x > 5}  # {6, 7, 8, 9} — set comprehension
+a | b, a & b, a - b, a ^ b     # union, intersection, difference, symmetric difference
+s.add(x), s.remove(x), s.issubset(t), ...
 ```
-Set comprehensions are like list comprehensions but produce a `set` (deduplicated, unordered). No direct TS equivalent; roughly `new Set(array.map(fn))`.
+Members can be any hashable value (same rules as dict keys, tuples included). Like `new Set()` in TS, except membership is by value — `(1, 2)` equals `(1, 2)` — not by reference.
 
 ### Multiline strings
 Triple-quoted strings work: `"""multi\nline"""`.
+
+### Raw strings
+```python
+r"\d+"        # backslashes kept literally — like String.raw`\d+` in TS
+r'\n'         # the two characters \ and n, not a newline
+rf"\d{n}"     # raw f-string: literal backslashes plus interpolation
+```
+`r`/`R` prefixes (and `rf`/`fr` combinations) work, including triple-quoted. As in CPython, a raw string cannot end in a lone backslash.
 
 ### Number literal formats
 ```python
@@ -204,6 +224,7 @@ Python supports hex (`0x`), octal (`0o`), and binary (`0b`) prefixes, plus under
 ### Operators
 Arithmetic: `+`, `-`, `*`, `/`, `//`, `%`, `**`.
 Bitwise: `&`, `|`, `^`, `~`, `<<`, `>>`.
+Set: `|` (union), `&` (intersection), `-` (difference), `^` (symmetric difference).
 String: `%` formatting (`"%s is %d" % ("age", 25)`), `+` concatenation, `*` repetition.
 Assignment: `a, *b, c = [1, 2, 3, 4, 5]` (starred unpacking), slice assignment (`x[1:3] = [20, 30]`).
 
@@ -315,8 +336,9 @@ Importing anything else raises `ModuleNotFoundError` (catchable with `except Imp
 
 Known limitations:
 - No `tzinfo` / aware datetimes, no `astimezone()`, no `datetime.time` (time-of-day) class, no `fold`.
-- `date`/`datetime` values are not hashable — they can't be dict keys or set members.
 - `datetime.now()` reflects the injected clock and session timezone, not the process-local timezone (CPython uses the machine's local time).
+
+JS `Date` objects returned by tool handlers (e.g. timestamp columns from a database driver) marshal into naive `datetime` values in the session timezone — the same wall clock `datetime.now()` uses.
 
 ### The `math` module
 
