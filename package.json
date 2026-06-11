@@ -1,6 +1,6 @@
 {
   "name": "defanged",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "description": "A sandboxed Python interpreter written in TypeScript. Safely run Python code emitted by LLMs and agents — no filesystem, no network, no escape.",
   "keywords": [
     "python",
