@@ -387,6 +387,10 @@ export function pyRepr(value: PyValue): string {
     case 'boolean':
       return value.value ? 'True' : 'False';
     case 'number':
+      // Python prints 'inf'/'nan' where JS String() gives 'Infinity'/'NaN'.
+      if (value.value === Infinity) return 'inf';
+      if (value.value === -Infinity) return '-inf';
+      if (Number.isNaN(value.value)) return 'nan';
       return String(value.value);
     case 'string':
       return `'${value.value}'`;

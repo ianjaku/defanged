@@ -72,6 +72,20 @@ export class StopIteration extends InterpreterError {
   }
 }
 
+export class OverflowError extends InterpreterError {
+  constructor(message: string, line: number, column: number) {
+    super(message, line, column);
+    this.name = 'OverflowError';
+  }
+}
+
+export class StatisticsError extends ValueError {
+  constructor(message: string, line: number, column: number) {
+    super(message, line, column);
+    this.name = 'StatisticsError';
+  }
+}
+
 export class ImportError extends InterpreterError {
   constructor(message: string, line: number, column: number) {
     super(message, line, column);

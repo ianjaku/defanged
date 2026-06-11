@@ -3017,3 +3017,334 @@ from datetime import datetime, date
 `)).toEqual([true, false]);
   });
 });
+
+// ─── math module ─────────────────────────────────────────────────────────────
+// Expected values verified against CPython 3.9.6.
+
+describe('math module - imports and constants', () => {
+  test('import math, math.pi', async () => {
+    expect(await runPython(`import math\nmath.pi`)).toBe(3.141592653589793);
+  });
+
+  test('import math as m', async () => {
+    expect(await runPython(`import math as m\nm.e`)).toBe(2.718281828459045);
+  });
+
+  test('from math import sqrt, pi', async () => {
+    expect(await runPython(`from math import sqrt, pi\nsqrt(pi) > 1.77`)).toBe(true);
+  });
+
+  test('from math import * exposes tau', async () => {
+    expect(await runPython(`from math import *\ntau`)).toBe(6.283185307179586);
+  });
+
+  test('module attribute error', async () => {
+    await expect(runPython(`import math\nmath.bogus`)).rejects.toThrow("module 'math' has no attribute 'bogus'");
+  });
+});
+
+describe('math module - basics', () => {
+  test('sqrt', async () => {
+    expect(await runPython(`import math\nmath.sqrt(2)`)).toBe(1.4142135623730951);
+  });
+
+  test('floor and ceil', async () => {
+    expect(await runPython(`import math\n[math.floor(-3.7), math.floor(3.7), math.ceil(3.2), math.ceil(-3.2)]`)).toEqual([-4, 3, 4, -3]);
+  });
+
+  test('trunc', async () => {
+    expect(await runPython(`import math\n[math.trunc(-3.7), math.trunc(3.7)]`)).toEqual([-3, 3]);
+  });
+
+  test('fabs and pow', async () => {
+    expect(await runPython(`import math\n[math.fabs(-3), math.pow(2, 10)]`)).toEqual([3, 1024]);
+  });
+
+  test('exp', async () => {
+    expect(await runPython(`import math\nmath.exp(1)`)).toBe(2.718281828459045);
+  });
+
+  test('bool inputs coerce like CPython', async () => {
+    expect(await runPython(`import math\nmath.sqrt(True)`)).toBe(1);
+  });
+});
+
+describe('math module - log family', () => {
+  test('natural log', async () => {
+    expect(await runPython(`import math\nmath.log(10)`)).toBe(2.302585092994046);
+  });
+
+  test('two-arg log with base', async () => {
+    expect(await runPython(`import math\nmath.log(8, 2)`)).toBe(3);
+  });
+
+  test('log10 and log2', async () => {
+    expect(await runPython(`import math\n[math.log10(1000), math.log2(1024)]`)).toEqual([3, 10]);
+  });
+
+  test('log base 1 raises ZeroDivisionError', async () => {
+    await expect(runPython(`import math\nmath.log(10, 1)`)).rejects.toThrow('ivision');
+  });
+});
+
+describe('math module - domain and range errors', () => {
+  test('sqrt(-1) raises math domain error', async () => {
+    await expect(runPython(`import math\nmath.sqrt(-1)`)).rejects.toThrow('math domain error');
+  });
+
+  test('log(0) and asin(2) raise math domain error', async () => {
+    await expect(runPython(`import math\nmath.log(0)`)).rejects.toThrow('math domain error');
+    await expect(runPython(`import math\nmath.asin(2)`)).rejects.toThrow('math domain error');
+  });
+
+  test('pow(0, -1) raises math domain error', async () => {
+    await expect(runPython(`import math\nmath.pow(0, -1)`)).rejects.toThrow('math domain error');
+  });
+
+  test('domain error is caught by except ValueError', async () => {
+    expect(await runPython(`
+import math
+try:
+    math.sqrt(-1)
+except ValueError:
+    x = 'caught'
+x
+`)).toBe('caught');
+  });
+
+  test('exp overflow raises math range error, caught by OverflowError', async () => {
+    expect(await runPython(`
+import math
+try:
+    math.exp(1000)
+except OverflowError:
+    x = 'caught'
+x
+`)).toBe('caught');
+    await expect(runPython(`import math\nmath.exp(1000)`)).rejects.toThrow('math range error');
+  });
+
+  test('floor(inf) and ceil(nan) raise conversion errors', async () => {
+    await expect(runPython(`import math\nmath.floor(math.inf)`)).rejects.toThrow('cannot convert float infinity to integer');
+    await expect(runPython(`import math\nmath.ceil(math.nan)`)).rejects.toThrow('cannot convert float NaN to integer');
+  });
+});
+
+describe('math module - trig and angle conversion', () => {
+  test('sin at pi/2 and pi', async () => {
+    expect(await runPython(`import math\n[math.sin(math.pi / 2), math.sin(math.pi)]`)).toEqual([1, 1.2246467991473532e-16]);
+  });
+
+  test('cos and tan', async () => {
+    expect(await runPython(`import math\n[math.cos(0), math.tan(0)]`)).toEqual([1, 0]);
+  });
+
+  test('asin and atan2', async () => {
+    expect(await runPython(`import math\n[math.asin(1), math.atan2(-1, -1)]`)).toEqual([1.5707963267948966, -2.356194490192345]);
+  });
+
+  test('radians and degrees', async () => {
+    expect(await runPython(`import math\n[math.radians(180), math.degrees(math.pi)]`)).toEqual([3.141592653589793, 180]);
+  });
+});
+
+describe('math module - isclose and classification', () => {
+  test('isclose default tolerance', async () => {
+    expect(await runPython(`import math\n[math.isclose(1, 1.0000000001), math.isclose(1, 1.001)]`)).toEqual([true, false]);
+  });
+
+  test('isclose near zero needs abs_tol', async () => {
+    expect(await runPython(`import math\n[math.isclose(0, 1e-10), math.isclose(0, 1e-10, abs_tol=1e-9)]`)).toEqual([false, true]);
+  });
+
+  test('isclose with rel_tol', async () => {
+    expect(await runPython(`import math\nmath.isclose(1, 1.001, rel_tol=0.01)`)).toBe(true);
+  });
+
+  test('isclose with inf and nan', async () => {
+    expect(await runPython(`import math\n[math.isclose(math.inf, math.inf), math.isclose(math.nan, math.nan)]`)).toEqual([true, false]);
+  });
+
+  test('negative tolerance raises ValueError', async () => {
+    await expect(runPython(`import math\nmath.isclose(1, 2, rel_tol=-0.1)`)).rejects.toThrow('tolerances must be non-negative');
+  });
+
+  test('isnan, isinf, isfinite', async () => {
+    expect(await runPython(`
+import math
+[math.isnan(math.nan), math.isinf(-math.inf), math.isfinite(math.nan), math.isfinite(1.5)]
+`)).toEqual([true, true, false, true]);
+  });
+});
+
+describe('math module - inf and nan semantics', () => {
+  test('str of inf, -inf, nan matches CPython', async () => {
+    expect(await runPython(`import math\n[str(math.inf), str(-math.inf), str(math.nan)]`)).toEqual(['inf', '-inf', 'nan']);
+  });
+
+  test('f-string of -inf', async () => {
+    expect(await runPython(`import math\nf"{-math.inf}"`)).toBe('-inf');
+  });
+
+  test('inf compares above all floats', async () => {
+    expect(await runPython(`import math\nmath.inf > 1e308`)).toBe(true);
+  });
+
+  test('nan is not equal to itself', async () => {
+    expect(await runPython(`import math\nmath.nan == math.nan`)).toBe(false);
+  });
+
+  test('sorting with infinities', async () => {
+    expect(await runPython(`import math\nsorted([1.0, -math.inf, math.inf, 0])`)).toEqual([-Infinity, 0, 1, Infinity]);
+  });
+});
+
+// ─── statistics module ───────────────────────────────────────────────────────
+
+describe('statistics module - imports and StatisticsError', () => {
+  test('mean([]) raises StatisticsError with CPython message', async () => {
+    await expect(runPython(`
+from statistics import mean
+mean([])
+`)).rejects.toThrow('mean requires at least one data point');
+  });
+
+  test('except StatisticsError catches it', async () => {
+    expect(await runPython(`
+from statistics import mean, StatisticsError
+try:
+    mean([])
+except StatisticsError:
+    x = 'caught'
+x
+`)).toBe('caught');
+  });
+
+  test('except ValueError catches it too (subclass)', async () => {
+    expect(await runPython(`
+import statistics
+try:
+    statistics.mean([])
+except ValueError:
+    x = 'caught'
+x
+`)).toBe('caught');
+  });
+
+  test('raised StatisticsError is caught by ValueError', async () => {
+    expect(await runPython(`
+from statistics import StatisticsError
+try:
+    raise StatisticsError('boom')
+except ValueError:
+    x = 'caught'
+x
+`)).toBe('caught');
+  });
+});
+
+describe('statistics module - mean and median', () => {
+  test('mean of ints', async () => {
+    expect(await runPython(`import statistics\nstatistics.mean([1, 2, 3, 4])`)).toBe(2.5);
+  });
+
+  test('mean with repeating decimal', async () => {
+    expect(await runPython(`import statistics\nstatistics.mean([1, 2, 4])`)).toBe(2.3333333333333335);
+  });
+
+  test('mean of booleans', async () => {
+    expect(await runPython(`import statistics\nstatistics.mean([True, True, False])`)).toBe(0.6666666666666666);
+  });
+
+  test('mean over range()', async () => {
+    expect(await runPython(`import statistics\nstatistics.mean(range(1, 11))`)).toBe(5.5);
+  });
+
+  test('median odd and even', async () => {
+    expect(await runPython(`import statistics\n[statistics.median([1, 3, 5]), statistics.median([1, 3, 5, 7])]`)).toEqual([3, 4]);
+  });
+
+  test('median sorts first', async () => {
+    expect(await runPython(`import statistics\nstatistics.median([3, 1])`)).toBe(2);
+  });
+
+  test('median of empty data raises', async () => {
+    await expect(runPython(`import statistics\nstatistics.median([])`)).rejects.toThrow('no median for empty data');
+  });
+});
+
+describe('statistics module - mode', () => {
+  test('simple mode', async () => {
+    expect(await runPython(`import statistics\nstatistics.mode([1, 2, 2, 3])`)).toBe(2);
+  });
+
+  test('tie goes to first encountered', async () => {
+    expect(await runPython(`import statistics\n[statistics.mode([1, 1, 2, 2]), statistics.mode([2, 2, 1, 1])]`)).toEqual([1, 2]);
+  });
+
+  test('mode of categorical strings', async () => {
+    expect(await runPython(`import statistics\nstatistics.mode(['red', 'blue', 'blue', 'red', 'green', 'red'])`)).toBe('red');
+  });
+
+  test('mode of booleans', async () => {
+    expect(await runPython(`import statistics\nstatistics.mode([True, True, False])`)).toBe(true);
+  });
+
+  test('mode of empty data raises', async () => {
+    await expect(runPython(`import statistics\nstatistics.mode([])`)).rejects.toThrow('no mode for empty data');
+  });
+});
+
+describe('statistics module - spread', () => {
+  test('stdev, pstdev, variance, pvariance on 1..5', async () => {
+    expect(await runPython(`
+import statistics
+data = [1, 2, 3, 4, 5]
+[statistics.stdev(data), statistics.pstdev(data), statistics.variance(data), statistics.pvariance(data)]
+`)).toEqual([1.5811388300841898, 1.4142135623730951, 2.5, 2]);
+  });
+
+  test('stdev of constant data is zero', async () => {
+    expect(await runPython(`import statistics\nstatistics.stdev([1, 1, 1])`)).toBe(0);
+  });
+
+  test('stdev matches CPython on float data', async () => {
+    expect(await runPython(`import statistics\nstatistics.stdev([2.75, 1.75, 1.25, 0.25, 0.5, 1.25, 3.5])`)).toBe(1.171334200612195);
+  });
+
+  test('stdev of single point raises with variance message', async () => {
+    await expect(runPython(`import statistics\nstatistics.stdev([1])`)).rejects.toThrow('variance requires at least two data points');
+  });
+
+  test('pstdev of empty data raises with pvariance message', async () => {
+    await expect(runPython(`import statistics\nstatistics.pstdev([])`)).rejects.toThrow('pvariance requires at least one data point');
+  });
+});
+
+describe('statistics module - quantiles', () => {
+  test('default n=4 exclusive', async () => {
+    expect(await runPython(`import statistics\nstatistics.quantiles([1, 2, 3, 4, 5])`)).toEqual([1.5, 3.0, 4.5]);
+  });
+
+  test('explicit n=4', async () => {
+    expect(await runPython(`import statistics\nstatistics.quantiles([1, 2, 3, 4], n=4)`)).toEqual([1.25, 2.5, 3.75]);
+  });
+
+  test('deciles', async () => {
+    expect(await runPython(`import statistics\nstatistics.quantiles([1, 2, 3, 4, 5], n=10)`)).toEqual([0.6, 1.2, 1.8, 2.4, 3.0, 3.6, 4.2, 4.8, 5.4]);
+  });
+
+  test('inclusive method', async () => {
+    expect(await runPython(`import statistics\nstatistics.quantiles([1, 2, 3, 4, 5], n=4, method='inclusive')`)).toEqual([2.0, 3.0, 4.0]);
+  });
+
+  test('exclusive method extrapolates beyond data', async () => {
+    expect(await runPython(`import statistics\nstatistics.quantiles([1, 2], n=4)`)).toEqual([0.75, 1.5, 2.25]);
+  });
+
+  test('errors: too few points, bad n, unknown method', async () => {
+    await expect(runPython(`import statistics\nstatistics.quantiles([1])`)).rejects.toThrow('must have at least two data points');
+    await expect(runPython(`import statistics\nstatistics.quantiles([1, 2, 3], n=0)`)).rejects.toThrow('n must be at least 1');
+    await expect(runPython(`import statistics\nstatistics.quantiles([1, 2, 3], method='nearest')`)).rejects.toThrow("Unknown method: 'nearest'");
+  });
+});

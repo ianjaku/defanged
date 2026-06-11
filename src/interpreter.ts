@@ -61,6 +61,8 @@ import {
   MaxIterationsError,
   ImportError,
   ModuleNotFoundError,
+  OverflowError,
+  StatisticsError,
 } from './errors';
 import {
   createDatetimeModule,
@@ -71,6 +73,8 @@ import {
   negateTimedelta,
   strftime,
 } from './datetime';
+import { mathModule } from './math';
+import { statisticsModule } from './statistics';
 import { parse } from './parser';
 
 // ── Sync/async plumbing ─────────────────────────────────────────────────────
@@ -184,8 +188,12 @@ export class Interpreter {
     this.maxIterations = options.maxIterations ?? 5_000_000;
     this.onPrint = options.onPrint;
     // Validates the timezone eagerly — an invalid IANA name throws here.
+    // math/statistics are stateless singletons; only datetime is built per
+    // interpreter (it closes over the clock and timezone).
     this.modules = new Map([
       ['datetime', createDatetimeModule(options.now ?? Date.now, options.timezone ?? 'UTC')],
+      ['math', mathModule],
+      ['statistics', statisticsModule],
     ]);
     this.builtins = createBuiltins({
       onPrint: options.onPrint,
@@ -329,6 +337,8 @@ export class Interpreter {
               case 'NameError': throw new NameError(msg, stmt.line, stmt.column);
               case 'ImportError': throw new ImportError(msg, stmt.line, stmt.column);
               case 'ModuleNotFoundError': throw new ModuleNotFoundError(msg, stmt.line, stmt.column);
+              case 'OverflowError': throw new OverflowError(msg, stmt.line, stmt.column);
+              case 'StatisticsError': throw new StatisticsError(msg, stmt.line, stmt.column);
               default: throw new InterpreterError(msg, stmt.line, stmt.column);
             }
           }
@@ -2119,16 +2129,18 @@ export class Interpreter {
   private exceptionMatches(error: Error, exceptionTypes: string[] | null): boolean {
     if (exceptionTypes === null) return true;
     const errorTypeMap: Record<string, string[]> = {
-      'Exception': ['TypeError', 'NameError', 'KeyError', 'IndexError', 'ZeroDivisionError', 'ValueError', 'SyntaxError', 'AttributeError', 'StopIteration', 'InterpreterError', 'ImportError', 'ModuleNotFoundError'],
+      'Exception': ['TypeError', 'NameError', 'KeyError', 'IndexError', 'ZeroDivisionError', 'ValueError', 'SyntaxError', 'AttributeError', 'StopIteration', 'InterpreterError', 'ImportError', 'ModuleNotFoundError', 'OverflowError', 'StatisticsError'],
       'ImportError': ['ImportError', 'ModuleNotFoundError'],
       'ModuleNotFoundError': ['ModuleNotFoundError'],
+      'OverflowError': ['OverflowError'],
+      'StatisticsError': ['StatisticsError'],
       'StopIteration': ['StopIteration'],
       'TypeError': ['TypeError'],
       'NameError': ['NameError'],
       'KeyError': ['KeyError'],
       'IndexError': ['IndexError'],
       'ZeroDivisionError': ['ZeroDivisionError'],
-      'ValueError': ['ValueError'],
+      'ValueError': ['ValueError', 'StatisticsError'],
       'SyntaxError': ['SyntaxError'],
       'AttributeError': ['AttributeError'],
     };

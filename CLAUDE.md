@@ -21,7 +21,7 @@ Supporting files: `src/tokens.ts` (token types), `src/ast.ts` (node types), `src
 
 ## Non-negotiable rules
 
-1. **Never widen the safety boundary.** No `exec`, `eval`, `open`, `compile`, `__import__`, filesystem, network, or subprocess. These features don't exist and shouldn't be added. `import` resolves only against the built-in whitelist of pure-computation modules (currently just `datetime`); never whitelist a module that performs I/O. If data needs to come in from the outside, it goes through `ToolDefinition`.
+1. **Never widen the safety boundary.** No `exec`, `eval`, `open`, `compile`, `__import__`, filesystem, network, or subprocess. These features don't exist and shouldn't be added. `import` resolves only against the built-in whitelist of pure-computation modules (currently `datetime`, `math`, `statistics`); never whitelist a module that performs I/O. If data needs to come in from the outside, it goes through `ToolDefinition`.
 2. **Tests are the spec.** `tests/features.test.ts` documents behavioral expectations. Before changing semantics, add or update a test that pins the new behavior.
 3. **Match CPython.** Don't invent Python. If unsure, verify in `python3 -c "..."`.
 4. **Always use Bun** instead of npm

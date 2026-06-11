@@ -1,6 +1,6 @@
 # tespy-parser: Feature Support Matrix
 
-A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**733 pass / 0 fail** as of 2026-06-11).
+A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**796 pass / 0 fail** as of 2026-06-11).
 
 Explanations are written for TypeScript developers who may not know Python.
 
@@ -275,19 +275,21 @@ Not yet supported:
 - `gen.send(value)` — sending values into a generator
 - `gen.throw()` / `gen.close()` — generator cleanup protocol
 
-### The `datetime` module
+### Importable modules
 
-The only importable module. All standard import forms work:
+Three pure-computation modules are whitelisted: `datetime`, `math`, and `statistics`. All standard import forms work for each:
 
 ```python
 import datetime
 import datetime as dt
 from datetime import datetime, date, timedelta
-from datetime import datetime as DT
-from datetime import *
+from math import sqrt as root
+from statistics import *
 ```
 
 Importing anything else raises `ModuleNotFoundError` (catchable with `except ImportError`, as in CPython).
+
+### The `datetime` module
 
 | Feature | Does | TS analogue |
 |---|---|---|
@@ -315,6 +317,37 @@ Known limitations:
 - No `tzinfo` / aware datetimes, no `astimezone()`, no `datetime.time` (time-of-day) class, no `fold`.
 - `date`/`datetime` values are not hashable — they can't be dict keys or set members.
 - `datetime.now()` reflects the injected clock and session timezone, not the process-local timezone (CPython uses the machine's local time).
+
+### The `math` module
+
+| Feature | Does | TS analogue |
+|---|---|---|
+| `sqrt`, `exp`, `pow`, `fabs` | The obvious | `Math.sqrt` etc. |
+| `floor(x)`, `ceil(x)`, `trunc(x)` | Float → int (errors on inf/nan like CPython) | `Math.floor` etc. |
+| `log(x)`, `log(x, base)`, `log10`, `log2` | Logarithms | `Math.log(x) / Math.log(base)` |
+| `sin cos tan asin acos atan atan2` | Trigonometry (radians) | `Math.*` |
+| `radians(x)` / `degrees(x)` | Angle conversion | manual `* Math.PI / 180` |
+| `isnan` / `isinf` / `isfinite` | Float classification | `Number.isNaN` / `Number.isFinite` |
+| `isclose(a, b, rel_tol=, abs_tol=)` | Tolerant float comparison | no stdlib analogue |
+| `pi`, `e`, `tau`, `inf`, `nan` | Constants | `Math.PI`, `Infinity`, `NaN` |
+
+Domain errors match CPython: `sqrt(-1)`, `log(0)`, `asin(2)` raise `ValueError: math domain error`; `exp(1000)` raises `OverflowError: math range error`. `inf`/`nan` print as Python does (`'inf'`, not JavaScript's `'Infinity'`).
+
+Not included: `factorial`/`comb`/`perm` (unbounded loops, no agent use case), `gcd`/`hypot`/`fsum` (easy future adds), float plumbing (`frexp`, `ldexp`, `ulp`).
+
+### The `statistics` module
+
+| Feature | Does | TS analogue |
+|---|---|---|
+| `mean(data)` | Arithmetic mean | manual reduce |
+| `median(data)` | Middle value (averages middle pair for even n) | manual sort + pick |
+| `mode(data)` | Most common value; works on strings for categorical data; ties → first encountered | manual counting |
+| `stdev` / `variance` | Sample spread (n−1 divisor) | no stdlib analogue |
+| `pstdev` / `pvariance` | Population spread (n divisor) | no stdlib analogue |
+| `quantiles(data, n=4, method='exclusive')` | Cut points (quartiles, deciles, percentiles) | no stdlib analogue |
+| `StatisticsError` | Raised on empty/insufficient data; subclasses `ValueError` | — |
+
+Inputs accept lists, tuples, sets, and `range()`; elements may be numbers or booleans (plus strings for `mode`). Not included: generator inputs (wrap in `list()`, same as `sum()`), `xbar=` on variance/stdev, `fmean`/`geometric_mean`/`harmonic_mean`/`median_low`/`median_high`.
 
 ---
 

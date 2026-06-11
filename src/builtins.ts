@@ -1134,7 +1134,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
   });
 
   // Exception constructors — return a tagged value that `raise` can inspect
-  for (const name of ['Exception', 'ValueError', 'TypeError', 'KeyError', 'IndexError', 'ZeroDivisionError', 'NameError', 'RuntimeError', 'StopIteration', 'ImportError', 'ModuleNotFoundError']) {
+  for (const name of ['Exception', 'ValueError', 'TypeError', 'KeyError', 'IndexError', 'ZeroDivisionError', 'NameError', 'RuntimeError', 'StopIteration', 'ImportError', 'ModuleNotFoundError', 'OverflowError']) {
     builtins.set(name, {
       type: 'builtin',
       name,

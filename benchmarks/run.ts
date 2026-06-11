@@ -269,6 +269,18 @@ len(result)
 `,
   },
 
+  // ── Statistics ──────────────────────────────────────────────────────
+  {
+    name: 'statistics over 1000 points',
+    category: 'statistics',
+    iterations: 20,
+    code: `
+import statistics
+data = [(i * 37) % 1000 + (i % 7) * 0.5 for i in range(1000)]
+[statistics.mean(data), statistics.stdev(data), statistics.quantiles(data, n=10)[4]]
+`,
+  },
+
   // ── Datetime ────────────────────────────────────────────────────────
   {
     name: 'date arithmetic + strftime 1000',
