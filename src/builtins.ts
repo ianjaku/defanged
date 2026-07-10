@@ -24,6 +24,7 @@ import {
   isIterable,
   pyStr,
   pyRepr,
+  pyTypeName,
   isTruthy,
   valueToJs,
   pyHashKey,
@@ -37,7 +38,7 @@ import {
   setAdd,
   setValues,
 } from './values';
-import { TypeError, ValueError } from './errors';
+import { TypeError, ValueError, MemoryError } from './errors';
 import { isDatetimeLike, datetimeOrdering } from './datetime';
 
 /** Type guard for kwargs object */
@@ -56,27 +57,35 @@ export function extractKwargs(args: (PyValue | PyKwargs)[]): { args: PyValue[], 
   return { args: args as PyValue[], kwargs: {} };
 }
 
-/** Compare two PyValues, returns negative if a < b, 0 if equal, positive if a > b */
-export function compareValues(a: PyValue, b: PyValue): number {
-  if (isNumber(a) && isNumber(b)) {
-    return a.value - b.value;
+/**
+ * Rich comparison: negative if a < b, 0 if equal, positive if a > b.
+ * Matches CPython ordering rules — bools compare as ints, strings by code
+ * point (not locale), tuples/lists lexicographically (but never tuple vs
+ * list). `op` only shapes the error message; sort paths report '<' like
+ * CPython's sort does.
+ */
+export function compareValues(a: PyValue, b: PyValue, op = '<', line = 0, column = 0): number {
+  const aNum = isNumber(a) ? a.value : a.type === 'boolean' ? (a.value ? 1 : 0) : null;
+  const bNum = isNumber(b) ? b.value : b.type === 'boolean' ? (b.value ? 1 : 0) : null;
+  if (aNum !== null && bNum !== null) {
+    return aNum < bNum ? -1 : aNum > bNum ? 1 : 0;
   }
   if (isString(a) && isString(b)) {
-    return a.value.localeCompare(b.value);
+    return a.value < b.value ? -1 : a.value > b.value ? 1 : 0;
   }
-  if ((isTuple(a) || isList(a)) && (isTuple(b) || isList(b))) {
+  if ((isTuple(a) && isTuple(b)) || (isList(a) && isList(b))) {
     const minLen = Math.min(a.elements.length, b.elements.length);
     for (let i = 0; i < minLen; i++) {
-      const cmp = compareValues(a.elements[i], b.elements[i]);
+      const cmp = compareValues(a.elements[i], b.elements[i], '<', line, column);
       if (cmp !== 0) return cmp;
     }
     return a.elements.length - b.elements.length;
   }
   if (isDatetimeLike(a) || isDatetimeLike(b)) {
-    const cmp = datetimeOrdering(a, b, 0, 0);
+    const cmp = datetimeOrdering(a, b, line, column);
     if (cmp !== null) return cmp;
   }
-  throw new TypeError(`'<' not supported between '${a.type}' and '${b.type}'`, 0, 0);
+  throw new TypeError(`'${op}' not supported between instances of '${pyTypeName(a)}' and '${pyTypeName(b)}'`, line, column);
 }
 
 /**
@@ -164,7 +173,7 @@ function evaluateKeyExpression(expr: any, paramName: string, paramValue: PyValue
         }
         return pyString(obj.value[idx]);
       }
-      throw new TypeError(`'${obj.type}' object is not subscriptable`, 0, 0);
+      throw new TypeError(`'${pyTypeName(obj)}' object is not subscriptable`, 0, 0);
     }
     
     case 'Attribute': {
@@ -176,7 +185,7 @@ function evaluateKeyExpression(expr: any, paramName: string, paramValue: PyValue
         }
         return val;
       }
-      throw new TypeError(`'${obj.type}' object has no attribute '${expr.attr}'`, 0, 0);
+      throw new TypeError(`'${pyTypeName(obj)}' object has no attribute '${expr.attr}'`, 0, 0);
     }
     
     case 'String':
@@ -213,10 +222,13 @@ export interface BuiltinCallbacks {
   onPrint?: PrintCallback;
   onChart?: ChartCallback;
   onTable?: TableCallback;
+  /** Cap on elements a builtin may materialize at once (range()). */
+  maxCollectionSize?: number;
 }
 
 export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuiltin> {
   const { onPrint, onChart, onTable } = callbacks ?? {};
+  const maxCollectionSize = callbacks?.maxCollectionSize ?? Infinity;
   const builtins = new Map<string, PyBuiltin>();
 
   // len(obj) - Return the length of an object
@@ -229,7 +241,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
       if (isTuple(obj)) return pyNumber(obj.elements.length);
       if (isDict(obj)) return pyNumber(obj.entries.size);
       if (isSet(obj)) return pyNumber(obj.entries.size);
-      throw new TypeError(`object of type '${obj.type}' has no len()`, 0, 0);
+      throw new TypeError(`object of type '${pyTypeName(obj)}' has no len()`, 0, 0);
     },
   });
 
@@ -248,7 +260,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
             : null;
 
       if (!items) {
-        throw new TypeError(`'${iterable.type}' object is not iterable`, 0, 0);
+        throw new TypeError(`'${pyTypeName(iterable)}' object is not iterable`, 0, 0);
       }
 
       for (const item of items) {
@@ -257,7 +269,9 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
         } else if (item.type === 'boolean') {
           total += item.value ? 1 : 0;
         } else {
-          throw new TypeError(`unsupported operand type for sum: '${item.type}'`, 0, 0);
+          // CPython raises from the underlying +, naming the accumulator type.
+          const totalName = Number.isInteger(total) ? 'int' : 'float';
+          throw new TypeError(`unsupported operand type(s) for +: '${totalName}' and '${pyTypeName(item)}'`, 0, 0);
         }
       }
       
@@ -275,14 +289,14 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
       let stepVal = 1;
 
       if (!isNumber(startOrStop)) {
-        throw new TypeError(`'${startOrStop.type}' object cannot be interpreted as an integer`, 0, 0);
+        throw new TypeError(`'${pyTypeName(startOrStop)}' object cannot be interpreted as an integer`, 0, 0);
       }
 
       if (stop === undefined) {
         end = startOrStop.value;
       } else {
         if (!isNumber(stop)) {
-          throw new TypeError(`'${stop.type}' object cannot be interpreted as an integer`, 0, 0);
+          throw new TypeError(`'${pyTypeName(stop)}' object cannot be interpreted as an integer`, 0, 0);
         }
         start = startOrStop.value;
         end = stop.value;
@@ -290,12 +304,19 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
 
       if (step !== undefined) {
         if (!isNumber(step)) {
-          throw new TypeError(`'${step.type}' object cannot be interpreted as an integer`, 0, 0);
+          throw new TypeError(`'${pyTypeName(step)}' object cannot be interpreted as an integer`, 0, 0);
         }
         stepVal = step.value;
         if (stepVal === 0) {
           throw new TypeError('range() arg 3 must not be zero', 0, 0);
         }
+      }
+
+      // range materializes eagerly, so a huge span would allocate up front —
+      // check the count before building the array.
+      const count = Math.max(0, Math.ceil((end - start) / stepVal));
+      if (count > maxCollectionSize) {
+        throw new MemoryError(`result exceeds the maximum collection size (${maxCollectionSize} elements)`, 0, 0);
       }
 
       const values: PyValue[] = [];
@@ -337,7 +358,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
         return pyList([...iterable.values]);
       }
 
-      throw new TypeError(`'${iterable.type}' object is not iterable`, 0, 0);
+      throw new TypeError(`'${pyTypeName(iterable)}' object is not iterable`, 0, 0);
     },
   } as any);
 
@@ -361,7 +382,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
       if (isSet(iterable)) {
         return pyTuple(setValues(iterable));
       }
-      throw new TypeError(`'${iterable.type}' object is not iterable`, 0, 0);
+      throw new TypeError(`'${pyTypeName(iterable)}' object is not iterable`, 0, 0);
     },
   });
 
@@ -390,7 +411,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
             dictSet(dict, key, value);
           }
         } else {
-          throw new TypeError(`'${iterable.type}' object is not iterable`, 0, 0);
+          throw new TypeError(`'${pyTypeName(iterable)}' object is not iterable`, 0, 0);
         }
       }
 
@@ -427,7 +448,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
         return pySetFromValues(dictKeys(iterable));
       }
 
-      throw new TypeError(`'${iterable.type}' object is not iterable`, 0, 0);
+      throw new TypeError(`'${pyTypeName(iterable)}' object is not iterable`, 0, 0);
     },
   });
 
@@ -468,7 +489,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
         return pyNumber(parseInt(trimmed, 10));
       }
       if (obj.type === 'boolean') return pyNumber(obj.value ? 1 : 0);
-      throw new TypeError(`int() argument must be a string or a number, not '${obj.type}'`, 0, 0);
+      throw new TypeError(`int() argument must be a string or a number, not '${pyTypeName(obj)}'`, 0, 0);
     },
   });
 
@@ -487,7 +508,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
         return pyNumber(n);
       }
       if (obj.type === 'boolean') return pyNumber(obj.value ? 1.0 : 0.0);
-      throw new TypeError(`float() argument must be a string or a number, not '${obj.type}'`, 0, 0);
+      throw new TypeError(`float() argument must be a string or a number, not '${pyTypeName(obj)}'`, 0, 0);
     },
   });
 
@@ -507,7 +528,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
     name: 'abs',
     fn: (x: PyValue): PyValue => {
       if (!isNumber(x)) {
-        throw new TypeError(`bad operand type for abs(): '${x.type}'`, 0, 0);
+        throw new TypeError(`bad operand type for abs(): '${pyTypeName(x)}'`, 0, 0);
       }
       return pyNumber(Math.abs(x.value));
     },
@@ -519,7 +540,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
     name: 'round',
     fn: (x: PyValue, ndigits?: PyValue): PyValue => {
       if (!isNumber(x)) {
-        throw new TypeError(`type ${x.type} doesn't define __round__`, 0, 0);
+        throw new TypeError(`type ${pyTypeName(x)} doesn't define __round__ method`, 0, 0);
       }
       const digits = ndigits && isNumber(ndigits) ? ndigits.value : 0;
       const factor = Math.pow(10, digits);
@@ -568,7 +589,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
       if (isString(seq)) {
         return pyIterator(seq.value.split('').reverse().map(c => pyString(c)));
       }
-      throw new TypeError(`'${seq.type}' object is not reversible`, 0, 0);
+      throw new TypeError(`'${pyTypeName(seq)}' object is not reversible`, 0, 0);
     },
   });
 
@@ -592,7 +613,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
       } else if (isString(iterable)) {
         items = iterable.value.split('').map(c => pyString(c));
       } else {
-        throw new TypeError(`'${iterable.type}' object is not iterable`, 0, 0);
+        throw new TypeError(`'${pyTypeName(iterable)}' object is not iterable`, 0, 0);
       }
 
       const startVal = kwargs.start && isNumber(kwargs.start) ? kwargs.start.value : (args[1] && isNumber(args[1]) ? args[1].value : 0);
@@ -615,7 +636,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
         if (isList(it) || isTuple(it)) return it.elements;
         if (it.type === 'iterator') return it.values;
         if (isString(it)) return it.value.split('').map(c => pyString(c));
-        throw new TypeError(`'${it.type}' object is not iterable`, 0, 0);
+        throw new TypeError(`'${pyTypeName(it)}' object is not iterable`, 0, 0);
       });
       
       const minLen = Math.min(...arrays.map(a => a.length));
@@ -652,7 +673,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
     type: 'builtin',
     name: 'hex',
     fn: (x: PyValue): PyValue => {
-      if (!isNumber(x)) throw new TypeError(`'${x.type}' object cannot be interpreted as an integer`, 0, 0);
+      if (!isNumber(x)) throw new TypeError(`'${pyTypeName(x)}' object cannot be interpreted as an integer`, 0, 0);
       const n = Math.trunc(x.value);
       return pyString(n < 0 ? '-0x' + (-n).toString(16) : '0x' + n.toString(16));
     },
@@ -663,7 +684,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
     type: 'builtin',
     name: 'oct',
     fn: (x: PyValue): PyValue => {
-      if (!isNumber(x)) throw new TypeError(`'${x.type}' object cannot be interpreted as an integer`, 0, 0);
+      if (!isNumber(x)) throw new TypeError(`'${pyTypeName(x)}' object cannot be interpreted as an integer`, 0, 0);
       const n = Math.trunc(x.value);
       return pyString(n < 0 ? '-0o' + (-n).toString(8) : '0o' + n.toString(8));
     },
@@ -674,7 +695,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
     type: 'builtin',
     name: 'bin',
     fn: (x: PyValue): PyValue => {
-      if (!isNumber(x)) throw new TypeError(`'${x.type}' object cannot be interpreted as an integer`, 0, 0);
+      if (!isNumber(x)) throw new TypeError(`'${pyTypeName(x)}' object cannot be interpreted as an integer`, 0, 0);
       const n = Math.trunc(x.value);
       return pyString(n < 0 ? '-0b' + (-n).toString(2) : '0b' + n.toString(2));
     },
@@ -755,7 +776,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
       if (isSet(obj)) {
         return pyIterator(setValues(obj));
       }
-      throw new TypeError(`'${obj.type}' object is not iterable`, 0, 0);
+      throw new TypeError(`'${pyTypeName(obj)}' object is not iterable`, 0, 0);
     },
   });
 
@@ -773,7 +794,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
         }
         return iter.values[iter.index++];
       }
-      throw new TypeError(`'${iter.type}' object is not an iterator`, 0, 0);
+      throw new TypeError(`'${pyTypeName(iter)}' object is not an iterator`, 0, 0);
     },
   } as any);
 
@@ -899,7 +920,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
       } else if (iterable.type === 'iterator') {
         items = iterable.values;
       } else {
-        throw new TypeError(`'${iterable.type}' object is not iterable`, 0, 0);
+        throw new TypeError(`'${pyTypeName(iterable)}' object is not iterable`, 0, 0);
       }
       return pyBoolean(items.some(isTruthy));
     },
@@ -916,7 +937,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
       } else if (iterable.type === 'iterator') {
         items = iterable.values;
       } else {
-        throw new TypeError(`'${iterable.type}' object is not iterable`, 0, 0);
+        throw new TypeError(`'${pyTypeName(iterable)}' object is not iterable`, 0, 0);
       }
       return pyBoolean(items.every(isTruthy));
     },
@@ -1101,7 +1122,7 @@ export function createBuiltins(callbacks?: BuiltinCallbacks): Map<string, PyBuil
   });
 
   // Exception constructors — return a tagged value that `raise` can inspect
-  for (const name of ['Exception', 'ValueError', 'TypeError', 'KeyError', 'IndexError', 'ZeroDivisionError', 'NameError', 'RuntimeError', 'StopIteration', 'ImportError', 'ModuleNotFoundError', 'OverflowError']) {
+  for (const name of ['Exception', 'ValueError', 'TypeError', 'KeyError', 'IndexError', 'ZeroDivisionError', 'NameError', 'RuntimeError', 'StopIteration', 'ImportError', 'ModuleNotFoundError', 'OverflowError', 'MemoryError', 'ToolError']) {
     builtins.set(name, {
       type: 'builtin',
       name,

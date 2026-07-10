@@ -1,6 +1,6 @@
 # tespy-parser: Feature Support Matrix
 
-A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**849 pass / 0 fail** as of 2026-06-11).
+A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**939 pass / 0 fail** as of 2026-07-10).
 
 Explanations are written for TypeScript developers who may not know Python.
 
@@ -99,7 +99,10 @@ a, b = 1, 2         # implicit tuple unpacking
 a, b = b, a         # swap values
 a, b, c = [10, 20, 30]  # destructure from list
 (1, 2) + (3, 4)     # tuple concatenation → (1, 2, 3, 4)
+(1, 2) < (1, 3)     # lexicographic comparison → True (lists compare the same way)
+(1,) < (1, 2)       # a strict prefix is smaller → True
 ```
+Comparing a tuple to a list, or elements of incomparable types, raises `TypeError` like CPython (`'<' not supported between instances of 'str' and 'int'`).
 A tuple is conceptually a fixed-size, immutable array. Python uses them for multi-return values:
 ```python
 def divmod(a, b):
@@ -173,11 +176,14 @@ Like CPython, `True`/`1`/`1.0` are the same key, and unhashable keys (lists, dic
 - `try / except / else / finally` (Python's name for catch)
 - Chained comparisons: `1 < x < 10` (equivalent to `1 < x && x < 10`)
 - Short-circuit `and` / `or` (note: they return the operand, not a boolean — like `&&` / `||` in TS)
+- Semicolons separate simple statements on one line: `a = 1; b = 2` (single-line suites like `if x: y = 1` are **not** supported — use a newline and indent)
 
 ### Built-ins
 Working: `len`, `range`, `print` *(with `sep`/`end` kwargs)*, `abs`, `min`, `max`, `sum`, `round` *(banker's rounding)*, `sorted`, `reversed`, `enumerate` *(with `start=`)*, `zip`, `map`, `filter`, `any`, `all`, `type`, `isinstance` *(accepts type builtins and tuples)*, `repr`, `hex`, `oct`, `bin`, `ord`, `chr`, `pow` *(with optional modulo)*, `divmod`, `callable`, `iter`, `next`, `hash`, `id`, `tuple`.
 
-Exception constructors: `Exception`, `ValueError`, `TypeError`, `KeyError`, `IndexError`, `ZeroDivisionError`, `NameError`, `RuntimeError` — all work with `raise` and `except`.
+Exception constructors: `Exception`, `ValueError`, `TypeError`, `KeyError`, `IndexError`, `ZeroDivisionError`, `NameError`, `RuntimeError`, `MemoryError`, `ToolError` — all work with `raise` and `except`. `ToolError` (a `RuntimeError` subclass, sandbox-specific) is raised when a JS tool handler throws, so scripts can implement fallbacks; `MemoryError` is raised when an allocation would exceed the host's configured limits. The host-side `maxIterations` and `timeoutMs` bounds are deliberately **not** catchable — not even by a bare `except:` — so a `try` inside a loop can't neutralize them.
+
+Error messages use CPython's type names and wording (`'str'`, `'int'`, `'NoneType'` — not the interpreter's internal names) and carry a real `Line N, Column N` position, including errors raised inside built-ins. Models self-correct by pattern-matching CPython error text, so this wording is part of the behavioral contract. Unsupported constructs that models emit anyway (`class`, `with`, `async`/`await`) fail at parse time with a targeted message saying the construct is unsupported and what to do instead, rather than a generic `Unexpected token`.
 
 ### F-strings (most cases)
 ```python
@@ -298,7 +304,7 @@ Not yet supported:
 
 ### Importable modules
 
-Three pure-computation modules are whitelisted: `datetime`, `math`, and `statistics`. All standard import forms work for each:
+Four pure-computation modules are whitelisted: `datetime`, `math`, `statistics`, and `re`. All standard import forms work for each:
 
 ```python
 import datetime
@@ -306,6 +312,7 @@ import datetime as dt
 from datetime import datetime, date, timedelta
 from math import sqrt as root
 from statistics import *
+from re import findall
 ```
 
 Importing anything else raises `ModuleNotFoundError` (catchable with `except ImportError`, as in CPython).
@@ -370,6 +377,25 @@ Not included: `factorial`/`comb`/`perm` (unbounded loops, no agent use case), `g
 | `StatisticsError` | Raised on empty/insufficient data; subclasses `ValueError` | — |
 
 Inputs accept lists, tuples, sets, and `range()`; elements may be numbers or booleans (plus strings for `mode`). Not included: generator inputs (wrap in `list()`, same as `sum()`), `xbar=` on variance/stdev, `fmean`/`geometric_mean`/`harmonic_mean`/`median_low`/`median_high`.
+
+### The `re` module
+
+Backed by JavaScript `RegExp` — Python patterns are translated to the JS dialect before compilation.
+
+| Feature | Does | TS analogue |
+|---|---|---|
+| `search(p, s)` / `match(p, s)` / `fullmatch(p, s)` | First match anywhere / anchored at start / whole string; `None` when no match | `s.match(re)` |
+| `findall(p, s)` | All matches: strings, group strings, or tuples per CPython's group-count rules | `s.match(/…/g)` |
+| `finditer(p, s)` | Iterator of match objects | `s.matchAll(re)` |
+| `sub(p, repl, s, count=0)` / `subn` | Replace; `repl` supports `\1`, `\g<name>`, `\\`, `\n` | `s.replace(re, r)` |
+| `split(p, s, maxsplit=0)` | Split, captured groups included in the result | `s.split(re)` |
+| `compile(p, flags=0)` | Pattern object with all of the above as methods, plus `.pattern` | `new RegExp(p)` |
+| `escape(s)` | Escape special characters (CPython 3.7+ set) | manual replace |
+| `m.group(...)`, `m.groups()`, `m.groupdict()`, `m.start/end/span()` | Match object accessors, including named groups | `m.groups`, `m.index` |
+| `IGNORECASE`/`I`, `MULTILINE`/`M`, `DOTALL`/`S`, `ASCII`/`A` | Flags, combinable with `\|`; inline `(?i)` etc. also work | `i` / `m` / `s` RegExp flags |
+| `(?P<name>…)`, `(?P=name)`, `\A`, `\Z`, `(?#…)` | Python-only syntax, translated for JS | `(?<name>…)`, `\k<name>` |
+
+**Dialect caveats** (JS `RegExp` under the hood): `\d`/`\w`/`\s` are ASCII-only (CPython's default is Unicode-aware; this matches `re.ASCII` behavior, so the `ASCII` flag is a no-op); `$` does not match before a trailing newline like Python's does (use `\Z` semantics or `re.M`). Not supported, with targeted errors: `re.VERBOSE`/`(?x)`, scoped inline flags `(?i:…)`, conditional groups `(?(id)…)`, and callable `sub()` replacements (use `finditer` and build the string). Invalid patterns raise a catchable `ValueError` instead of `re.error`.
 
 ---
 

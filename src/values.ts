@@ -294,6 +294,39 @@ export function pyTimedelta(days: number, seconds: number, microseconds: number)
   return { type: 'timedelta', days, seconds, microseconds };
 }
 
+// ============ Type names ============
+
+/**
+ * CPython's name for a value's type, for error messages. Models self-correct
+ * by pattern-matching CPython wording, so 'str'/'int' beat 'string'/'number'.
+ * One number type means integer-valued floats report as 'int' (2.0 → 'int').
+ */
+export function pyTypeName(value: PyValue): string {
+  switch (value.type) {
+    case 'number':
+      return Number.isInteger(value.value) ? 'int' : 'float';
+    case 'string':
+      return 'str';
+    case 'boolean':
+      return 'bool';
+    case 'none':
+      return 'NoneType';
+    case 'builtin':
+      return 'builtin_function_or_method';
+    case 'kwargs':
+      return 'dict';
+    case 'date':
+      return 'datetime.date';
+    case 'datetime':
+      return 'datetime.datetime';
+    case 'timedelta':
+      return 'datetime.timedelta';
+    default:
+      // list, dict, set, tuple, function, generator, iterator, module
+      return value.type;
+  }
+}
+
 // ============ Hashing ============
 
 /**
@@ -328,7 +361,7 @@ export function pyHashKey(value: PyValue, line = 0, column = 0): PyHashKey {
     case 'timedelta':
       return `\x00td${value.days}:${value.seconds}:${value.microseconds}`;
     default:
-      throw new TypeError(`unhashable type: '${value.type}'`, line, column);
+      throw new TypeError(`unhashable type: '${pyTypeName(value)}'`, line, column);
   }
 }
 

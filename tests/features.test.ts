@@ -3652,3 +3652,446 @@ rf(21)
 `)).toBe(42);
   });
 });
+
+// ─── Tuple/list comparison operators ─────────────────────────────────────────
+// Expected values verified against CPython 3.13.
+
+describe('Tuple and list comparison operators', () => {
+  test('tuples compare lexicographically', async () => {
+    expect(await runPython(`[(1, 2) <= (1, 3), (1, 2) < (1, 3), (1, 3) > (1, 2), (1, 3) >= (1, 3)]`))
+      .toEqual([true, true, true, true]);
+  });
+
+  test('shorter tuple is a prefix → smaller', async () => {
+    expect(await runPython(`[(1,) < (1, 2), (2,) > (1, 9, 9)]`)).toEqual([true, true]);
+  });
+
+  test('equal tuples are <= and >=', async () => {
+    expect(await runPython(`[(1, 2) <= (1, 2), (1, 2) >= (1, 2), (1, 2) < (1, 2)]`))
+      .toEqual([true, true, false]);
+  });
+
+  test('first differing element decides; rest is not compared', async () => {
+    // CPython returns True without comparing 5 to "z"
+    expect(await runPython(`("x", 5) < ("y", "z")`)).toBe(true);
+  });
+
+  test('lists compare lexicographically', async () => {
+    expect(await runPython(`[[1, 2] < [1, 3], ["a"] < ["b"]]`)).toEqual([true, true]);
+  });
+
+  test('booleans compare as ints', async () => {
+    expect(await runPython(`[True < 2, False < True, (True, 2) < (1, 3)]`))
+      .toEqual([true, true, true]);
+  });
+
+  test('mixed element types raise TypeError with CPython wording', async () => {
+    await expect(runPython(`(1, "a") < (1, 2)`))
+      .rejects.toThrow("'<' not supported between instances of 'str' and 'int'");
+  });
+
+  test('tuple vs list comparison raises TypeError', async () => {
+    await expect(runPython(`(1, 2) < [1, 3]`))
+      .rejects.toThrow("'<' not supported between instances of 'tuple' and 'list'");
+  });
+
+  test('operator name appears in the error', async () => {
+    await expect(runPython(`None >= 1`))
+      .rejects.toThrow("'>=' not supported between instances of 'NoneType' and 'int'");
+  });
+
+  test('sorted() orders strings by code point, like CPython', async () => {
+    expect(await runPython(`sorted(["a", "B"])`)).toEqual(['B', 'a']);
+  });
+
+  test('sorted() with incomparable types raises CPython-style TypeError', async () => {
+    await expect(runPython(`sorted([1, "a"])`))
+      .rejects.toThrow("not supported between instances of");
+  });
+
+  test('min/max on tuples', async () => {
+    expect(await runPython(`str(min([(2, "b"), (1, "a")]))`)).toBe("(1, 'a')");
+  });
+});
+
+// ─── Semicolon statement separator ───────────────────────────────────────────
+
+describe('Semicolon statement separator', () => {
+  test('two statements on one line', async () => {
+    expect(await runPython(`a = 1; b = 2\na + b`)).toBe(3);
+  });
+
+  test('result is the last expression', async () => {
+    expect(await runPython(`a = 1; a + 1`)).toBe(2);
+  });
+
+  test('trailing semicolon is allowed', async () => {
+    expect(await runPython(`a = 41;\na + 1`)).toBe(42);
+  });
+
+  test('semicolons inside an indented block', async () => {
+    expect(await runPython(`
+total = 0
+for i in range(3):
+    x = i * 2; total += x
+total
+`)).toBe(6);
+  });
+
+  test('semicolons inside a function body', async () => {
+    expect(await runPython(`
+def f(n):
+    a = n; b = n * 2; return a + b
+f(5)
+`)).toBe(15);
+  });
+
+  test('semicolon does not split inside brackets or strings', async () => {
+    expect(await runPython(`s = "a;b"\nlen(s)`)).toBe(3);
+  });
+});
+
+// ─── CPython type names in error messages ────────────────────────────────────
+
+describe('CPython type names in error messages', () => {
+  test('str / str', async () => {
+    await expect(runPython(`"10" / "2"`))
+      .rejects.toThrow("unsupported operand type(s) for /: 'str' and 'str'");
+  });
+
+  test('int + str', async () => {
+    await expect(runPython(`1 + "a"`))
+      .rejects.toThrow("unsupported operand type(s) for +: 'int' and 'str'");
+  });
+
+  test('float + str', async () => {
+    await expect(runPython(`1.5 + "a"`))
+      .rejects.toThrow("unsupported operand type(s) for +: 'float' and 'str'");
+  });
+
+  test('NoneType in comparison errors', async () => {
+    await expect(runPython(`None < 1`))
+      .rejects.toThrow("'<' not supported between instances of 'NoneType' and 'int'");
+  });
+
+  test("len(5) says 'int'", async () => {
+    await expect(runPython(`len(5)`))
+      .rejects.toThrow("object of type 'int' has no len()");
+  });
+
+  test('sum over strings matches CPython message', async () => {
+    await expect(runPython(`sum(["1", "2"])`))
+      .rejects.toThrow("unsupported operand type(s) for +: 'int' and 'str'");
+  });
+
+  test('builtin errors carry the call-site position, not Line 0', async () => {
+    await expect(runPython(`x = 1\nsum(["1", "2"])`)).rejects.toThrow('Line 2');
+  });
+
+  test("'str' object is not callable", async () => {
+    await expect(runPython(`s = "hi"\ns()`)).rejects.toThrow("'str' object is not callable");
+  });
+
+  test("iteration error says 'int'", async () => {
+    await expect(runPython(`for x in 5:\n    pass`)).rejects.toThrow("'int' object is not iterable");
+  });
+});
+
+// ─── Targeted errors for unsupported constructs ──────────────────────────────
+
+describe('Targeted errors for unsupported constructs', () => {
+  test('class definition names the construct', async () => {
+    await expect(runPython(`class Foo:\n    pass`))
+      .rejects.toThrow('class definitions are not supported in this sandbox');
+  });
+
+  test('with-statement names the construct', async () => {
+    await expect(runPython(`with open("f.txt") as f:\n    pass`))
+      .rejects.toThrow('with-statements are not supported in this sandbox');
+  });
+
+  test('async def names the construct', async () => {
+    await expect(runPython(`async def f():\n    pass`))
+      .rejects.toThrow('async/await is not supported in this sandbox');
+  });
+
+  test('await in expression position names the construct', async () => {
+    await expect(runPython(`x = await fetch_data()`))
+      .rejects.toThrow('await is not supported in this sandbox');
+  });
+
+  test('targeted errors carry the real position', async () => {
+    await expect(runPython(`x = 1\nclass Foo:\n    pass`)).rejects.toThrow('Line 2');
+  });
+});
+
+// ─── Memory limits ───────────────────────────────────────────────────────────
+
+describe('Memory limits', () => {
+  test('huge string repetition raises MemoryError instead of OOMing', async () => {
+    await expect(runPython(`"x" * 10**9`)).rejects.toThrow('maximum string length');
+  });
+
+  test('huge list repetition raises MemoryError', async () => {
+    await expect(runPython(`[0] * 10**9`)).rejects.toThrow('maximum collection size');
+  });
+
+  test('huge range raises MemoryError', async () => {
+    await expect(runPython(`range(10**9)`)).rejects.toThrow('maximum collection size');
+  });
+
+  test('MemoryError is catchable like CPython', async () => {
+    expect(await runPython(`
+try:
+    x = [0] * 10**9
+    result = "allocated"
+except MemoryError:
+    result = "caught"
+result
+`)).toBe('caught');
+  });
+
+  test('limits are configurable', async () => {
+    const interpreter = createInterpreter({ limits: { maxCollectionSize: 10 } });
+    await expect(interpreter.run(`[0] * 11`)).rejects.toThrow('maximum collection size (10 elements)');
+    expect(await interpreter.run(`len([0] * 10)`)).toBe(10);
+  });
+
+  test('string concatenation is bounded', async () => {
+    const interpreter = createInterpreter({ limits: { maxStringLength: 10 } });
+    await expect(interpreter.run(`"aaaaaa" + "bbbbbb"`)).rejects.toThrow('maximum string length');
+  });
+
+  test('normal allocations are unaffected', async () => {
+    expect(await runPython(`len("x" * 1000)`)).toBe(1000);
+    expect(await runPython(`len([0] * 1000)`)).toBe(1000);
+  });
+});
+
+// ─── Tuple repetition (fidelity) ─────────────────────────────────────────────
+
+describe('Tuple repetition', () => {
+  test('tuple * int repeats like CPython', async () => {
+    expect(await runPython(`(1, 2) * 3`)).toEqual([1, 2, 1, 2, 1, 2]);
+  });
+
+  test('tuple * int stays a tuple', async () => {
+    expect(await runPython(`str(type((1, 2) * 2))`)).toBe("<class 'tuple'>");
+  });
+});
+
+// ─── re module ───────────────────────────────────────────────────────────────
+
+describe('re module', () => {
+  test('findall with no groups returns full matches', async () => {
+    expect(await runPython(`import re\nre.findall(r"\\d+", "a1b22c333")`)).toEqual(['1', '22', '333']);
+  });
+
+  test('findall with one group returns that group', async () => {
+    expect(await runPython(`import re\nre.findall(r"(\\w)\\d", "a1 b2")`)).toEqual(['a', 'b']);
+  });
+
+  test('findall with multiple groups returns tuples', async () => {
+    expect(await runPython(`import re\nre.findall(r"(\\w)(\\d)", "a1 b2")`)).toEqual([['a', '1'], ['b', '2']]);
+  });
+
+  test('search returns a match object with group()', async () => {
+    expect(await runPython(`
+import re
+m = re.search(r"(\\d+)-(\\d+)", "x 12-34 y")
+[m.group(0), m.group(1), m.group(2)]
+`)).toEqual(['12-34', '12', '34']);
+  });
+
+  test('group with multiple args returns a tuple', async () => {
+    expect(await runPython(`
+import re
+m = re.search(r"(\\d+)-(\\d+)", "12-34")
+m.group(1, 2)
+`)).toEqual(['12', '34']);
+  });
+
+  test('match anchors at the start, search does not', async () => {
+    expect(await runPython(`
+import re
+[re.match(r"\\d", "a1") is None, re.search(r"\\d", "a1") is None]
+`)).toEqual([true, false]);
+  });
+
+  test('failed match is None, successful match is truthy', async () => {
+    expect(await runPython(`
+import re
+m = re.search(r"b", "abc")
+"yes" if m else "no"
+`)).toBe('yes');
+  });
+
+  test('named groups via (?P<name>...) and groupdict', async () => {
+    expect(await runPython(`
+import re
+m = re.search(r"(?P<year>\\d{4})-(?P<month>\\d{2})", "2026-07-10")
+[m.group("year"), m.groupdict()]
+`)).toEqual(['2026', { year: '2026', month: '07' }]);
+  });
+
+  test('(?P=name) backreferences', async () => {
+    expect(await runPython(`import re\nre.findall(r"(?P<c>a)(?P=c)", "aa ab")`)).toEqual(['a']);
+  });
+
+  test('start/end/span', async () => {
+    expect(await runPython(`
+import re
+m = re.search(r"\\d+", "ab123cd")
+[m.start(), m.end(), m.span()]
+`)).toEqual([2, 5, [2, 5]]);
+  });
+
+  test('span of an unmatched group is (-1, -1)', async () => {
+    expect(await runPython(`
+import re
+m = re.match(r"(a)(b)?", "a")
+m.span(2)
+`)).toEqual([-1, -1]);
+  });
+
+  test('groups() with default for unmatched groups', async () => {
+    expect(await runPython(`
+import re
+m = re.match(r"(a)(b)?", "a")
+[m.groups(), m.groups("X")]
+`)).toEqual([['a', null], ['a', 'X']]);
+  });
+
+  test('sub replaces all matches', async () => {
+    expect(await runPython(`import re\nre.sub(r"\\d+", "#", "a1b22c333")`)).toBe('a#b#c#');
+  });
+
+  test('sub with numbered backreferences', async () => {
+    expect(await runPython(`import re\nre.sub(r"(\\w+)@(\\w+)", r"\\2.\\1", "user@example")`)).toBe('example.user');
+  });
+
+  test('sub with \\g<name> references', async () => {
+    expect(await runPython(`import re\nre.sub(r"(?P<n>\\d+)", r"[\\g<n>]", "x12y")`)).toBe('x[12]y');
+  });
+
+  test('sub with count limit', async () => {
+    expect(await runPython(`import re\nre.sub(r"\\d", "#", "1 2 3", 2)`)).toBe('# # 3');
+  });
+
+  test('subn returns (result, count)', async () => {
+    expect(await runPython(`import re\nre.subn(r"\\d", "#", "1 2 3")`)).toEqual(['# # #', 3]);
+  });
+
+  test('split on a pattern', async () => {
+    expect(await runPython(`import re\nre.split(r"[,;]\\s*", "a, b;c ,d")`)).toEqual(['a', 'b', 'c ', 'd']);
+  });
+
+  test('split keeps captured groups like CPython', async () => {
+    expect(await runPython(`import re\nre.split(r"(,)", "a,b,c")`)).toEqual(['a', ',', 'b', ',', 'c']);
+  });
+
+  test('split with maxsplit', async () => {
+    expect(await runPython(`import re\nre.split(r",", "a,b,c,d", 2)`)).toEqual(['a', 'b', 'c,d']);
+  });
+
+  test('split on zero-width matches like CPython 3.7+', async () => {
+    expect(await runPython(`import re\nre.split(r"x*", "abc")`)).toEqual(['', 'a', 'b', 'c', '']);
+  });
+
+  test('fullmatch requires the whole string', async () => {
+    expect(await runPython(`
+import re
+[re.fullmatch(r"\\d+", "123") is not None, re.fullmatch(r"\\d+", "123a") is not None]
+`)).toEqual([true, false]);
+  });
+
+  test('finditer yields match objects', async () => {
+    expect(await runPython(`import re\n[m.group() for m in re.finditer(r"\\d+", "a1b22")]`)).toEqual(['1', '22']);
+  });
+
+  test('compile returns a reusable pattern object', async () => {
+    expect(await runPython(`
+import re
+p = re.compile(r"\\d+")
+[p.findall("a1b22"), p.search("x9").group(), p.pattern]
+`)).toEqual([['1', '22'], '9', '\\d+']);
+  });
+
+  test('flags: IGNORECASE and MULTILINE combine with |', async () => {
+    expect(await runPython(`
+import re
+p = re.compile(r"^b", re.I | re.M)
+p.findall("Abc\\nBcd")
+`)).toEqual(['B']);
+  });
+
+  test('inline (?i) flag', async () => {
+    expect(await runPython(`import re\nre.findall(r"(?i)abc", "ABC abc")`)).toEqual(['ABC', 'abc']);
+  });
+
+  test('flags as positional arg to module functions', async () => {
+    expect(await runPython(`import re\nre.findall(r"abc", "ABC abc", re.IGNORECASE)`)).toEqual(['ABC', 'abc']);
+  });
+
+  test('\\A anchors to string start', async () => {
+    expect(await runPython(`import re\nre.findall(r"\\Aa", "aaa")`)).toEqual(['a']);
+  });
+
+  test('escape matches CPython 3.7+ (special chars only)', async () => {
+    expect(await runPython(`import re\nre.escape("1+1=2 (maybe)")`)).toBe('1\\+1=2\\ \\(maybe\\)');
+  });
+
+  test('from re import findall', async () => {
+    expect(await runPython(`from re import findall\nfindall(r"\\d", "a1b2")`)).toEqual(['1', '2']);
+  });
+
+  test('re.VERBOSE raises a targeted error', async () => {
+    await expect(runPython(`import re\nre.compile(r"a b", re.X)`))
+      .rejects.toThrow('re.VERBOSE');
+  });
+
+  test('invalid pattern raises a catchable error', async () => {
+    expect(await runPython(`
+import re
+try:
+    re.compile(r"(unclosed")
+    result = "compiled"
+except ValueError:
+    result = "caught"
+result
+`)).toBe('caught');
+  });
+
+  test('callable replacement raises a targeted error', async () => {
+    await expect(runPython(`import re\nre.sub(r"\\d", lambda m: "x", "123")`))
+      .rejects.toThrow('callable replacements are not supported');
+  });
+});
+
+describe('Memory limits - string building methods', () => {
+  test('str.join respects the string limit', async () => {
+    const interpreter = createInterpreter({ limits: { maxStringLength: 10 } });
+    await expect(interpreter.run(`"".join(["xxxxx", "yyyyy", "zzzzz"])`)).rejects.toThrow('maximum string length');
+  });
+
+  test('padding methods respect the string limit', async () => {
+    const interpreter = createInterpreter({ limits: { maxStringLength: 100 } });
+    await expect(interpreter.run(`"x".ljust(10**9)`)).rejects.toThrow('maximum string length');
+    await expect(interpreter.run(`"x".rjust(10**9)`)).rejects.toThrow('maximum string length');
+    await expect(interpreter.run(`"x".center(10**9)`)).rejects.toThrow('maximum string length');
+    await expect(interpreter.run(`"1".zfill(10**9)`)).rejects.toThrow('maximum string length');
+  });
+
+  test('join and padding still work under the limit', async () => {
+    expect(await runPython(`",".join(["a", "b", "c"])`)).toBe('a,b,c');
+    expect(await runPython(`"7".zfill(3)`)).toBe('007');
+    expect(await runPython(`"hi".center(6, "*")`)).toBe('**hi**');
+  });
+});
+
+describe('MaxIterationsError positions', () => {
+  test('a runaway comprehension reports the comprehension line, not Line 0', async () => {
+    const interpreter = createInterpreter({ maxIterations: 10 });
+    await expect(interpreter.run(`x = 1\ny = [i for i in range(100)]`)).rejects.toThrow('Line 2');
+  });
+});

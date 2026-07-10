@@ -18,6 +18,15 @@ import {
 import { SyntaxError } from './errors';
 import { tokenize } from './lexer';
 
+/** Targeted diagnostics for Python constructs this sandbox deliberately
+ *  lacks. Keyed by the identifier that opens the construct. */
+const UNSUPPORTED_CONSTRUCTS: Record<string, string> = {
+  'class': 'class definitions are not supported in this sandbox — use dicts and functions instead',
+  'with': 'with-statements are not supported in this sandbox — there are no files or context managers here; call functions directly',
+  'async': 'async/await is not supported in this sandbox — tool calls already look synchronous to the script; use a regular def and call tools directly',
+  'await': 'await is not supported in this sandbox — tool calls are awaited automatically; call the tool like a normal function',
+};
+
 export class Parser {
   private tokens: Token[];
   private pos: number = 0;
@@ -57,6 +66,8 @@ export class Parser {
       return null;
     }
 
+    this.checkUnsupportedConstruct();
+
     if (this.check(TokenType.IMPORT)) return this.importStatement();
     if (this.check(TokenType.FROM)) return this.fromImportStatement();
     if (this.check(TokenType.IF)) return this.ifStatement();
@@ -77,6 +88,17 @@ export class Parser {
     if (this.check(TokenType.YIELD)) return this.yieldStatement();
 
     return this.assignmentOrExpression();
+  }
+
+  /** `class`, `with`, `async` and `await` are reserved in Python but lex as
+   *  identifiers here since the constructs don't exist. Models emit them
+   *  anyway, so fail with a message that says what to change instead of a
+   *  generic "Unexpected token". */
+  private checkUnsupportedConstruct(): void {
+    if (!this.check(TokenType.IDENTIFIER)) return;
+    const token = this.peek();
+    const message = UNSUPPORTED_CONSTRUCTS[token.value as string];
+    if (message) throw new SyntaxError(message, token.line, token.column);
   }
 
   private ifStatement(): Statement {
@@ -1269,9 +1291,14 @@ export class Parser {
 
     // Identifier
     if (this.match(TokenType.IDENTIFIER)) {
+      const name = this.previous().value as string;
+      // `x = await foo()` — catch await in expression position too.
+      if (name === 'await') {
+        throw new SyntaxError(UNSUPPORTED_CONSTRUCTS['await'], token.line, token.column);
+      }
       return {
         type: 'Identifier',
-        name: this.previous().value as string,
+        name,
         line: token.line,
         column: token.column,
       };

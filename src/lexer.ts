@@ -126,6 +126,20 @@ export class Lexer {
       return;
     }
 
+    // Semicolon separates simple statements on one line (a = 1; b = 2).
+    // Emits a logical-line break without touching indentation, so the rest
+    // of the line stays in the same block. Illegal inside parentheses.
+    if (char === ';') {
+      if (this.parenDepth > 0) {
+        throw new SyntaxError(`Unexpected character ';'`, this.line, this.column);
+      }
+      if (this.tokens.length === 0 || this.tokens[this.tokens.length - 1].type !== TokenType.NEWLINE) {
+        this.tokens.push(this.makeToken(TokenType.NEWLINE, null));
+      }
+      this.advance();
+      return;
+    }
+
     // Operators and delimiters
     this.operator();
   }

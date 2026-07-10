@@ -24,6 +24,7 @@ import {
   isDate,
   isDatetime,
   isTimedelta,
+  pyTypeName,
 } from './values';
 import { extractKwargs } from './builtins';
 import { TypeError, ValueError } from './errors';
@@ -681,7 +682,7 @@ export function createDatetimeModule(now: () => number, timezone: string): PyMod
         // Positional order matches CPython: days, seconds, microseconds.
         const value = (i < 3 ? args[i] : undefined) ?? kwargs[name];
         if (value === undefined) continue;
-        if (!isNumber(value)) throw new TypeError(`unsupported type for timedelta ${name} component: '${value.type}'`, 0, 0);
+        if (!isNumber(value)) throw new TypeError(`unsupported type for timedelta ${name} component: '${pyTypeName(value)}'`, 0, 0);
         totalMs += value.value * msPerUnit;
       }
       return timedeltaFromFloatMs(totalMs);

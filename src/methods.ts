@@ -20,6 +20,7 @@ import {
   pyEquals,
   valueToJs,
   pyRepr,
+  pyTypeName,
   dictGet,
   dictSet,
   dictHas,
@@ -34,11 +35,21 @@ import {
   setValues,
   pySetFromValues,
 } from './values';
-import { TypeError, IndexError, KeyError, ValueError } from './errors';
+import { TypeError, IndexError, KeyError, ValueError, MemoryError } from './errors';
 import { extractKwargs, compareValues, applyKeyFunction } from './builtins';
 
-export function getStringMethod(obj: PyValue & { type: 'string' }, attr: string, line: number, column: number): PyValue {
+export function getStringMethod(
+  obj: PyValue & { type: 'string' }, attr: string, line: number, column: number,
+  maxStringLength: number = Infinity
+): PyValue {
   const str = obj.value;
+  // join and the width-padding methods can allocate a huge string in one
+  // step, so they respect the host's string limit like `*` and `+` do.
+  const checkLength = (resultLength: number): void => {
+    if (resultLength > maxStringLength) {
+      throw new MemoryError(`result exceeds the maximum string length (${maxStringLength} characters)`, line, column);
+    }
+  };
 
   const methods: Record<string, PyBuiltin> = {
     upper: {
@@ -69,6 +80,7 @@ export function getStringMethod(obj: PyValue & { type: 'string' }, attr: string,
           throw new TypeError("zfill() argument must be an integer", line, column);
         }
         const w = Math.floor(width.value);
+        checkLength(w);
         if (str.length >= w) return pyString(str);
         if (str.startsWith('-') || str.startsWith('+')) {
           return pyString(str[0] + str.slice(1).padStart(w - 1, '0'));
@@ -145,10 +157,13 @@ export function getStringMethod(obj: PyValue & { type: 'string' }, attr: string,
           null;
 
         if (elements) {
+          let total = elements.length > 1 ? (elements.length - 1) * str.length : 0;
           const strs = elements.map(el => {
             if (!isString(el)) throw new TypeError('sequence item: expected str', line, column);
+            total += el.value.length;
             return el.value;
           });
+          checkLength(total);
           return pyString(strs.join(str));
         }
         throw new TypeError(`can only join an iterable`, line, column);
@@ -268,6 +283,7 @@ export function getStringMethod(obj: PyValue & { type: 'string' }, attr: string,
       name: 'str.ljust',
       fn: (width: PyValue, fill?: PyValue) => {
         if (!isNumber(width)) throw new TypeError('ljust() argument must be an integer', line, column);
+        checkLength(Math.floor(width.value));
         const fillChar = fill && isString(fill) ? fill.value : ' ';
         return pyString(str.padEnd(Math.floor(width.value), fillChar));
       },
@@ -277,6 +293,7 @@ export function getStringMethod(obj: PyValue & { type: 'string' }, attr: string,
       name: 'str.rjust',
       fn: (width: PyValue, fill?: PyValue) => {
         if (!isNumber(width)) throw new TypeError('rjust() argument must be an integer', line, column);
+        checkLength(Math.floor(width.value));
         const fillChar = fill && isString(fill) ? fill.value : ' ';
         return pyString(str.padStart(Math.floor(width.value), fillChar));
       },
@@ -286,6 +303,7 @@ export function getStringMethod(obj: PyValue & { type: 'string' }, attr: string,
       name: 'str.center',
       fn: (width: PyValue, fill?: PyValue) => {
         if (!isNumber(width)) throw new TypeError('center() argument must be an integer', line, column);
+        checkLength(Math.floor(width.value));
         const w = Math.floor(width.value);
         const fillChar = fill && isString(fill) ? fill.value : ' ';
         if (str.length >= w) return pyString(str);
@@ -485,7 +503,7 @@ export function getListMethod(obj: PyValue & { type: 'list' }, attr: string, lin
         if (isList(iterable) || isTuple(iterable)) {
           list.push(...iterable.elements);
         } else {
-          throw new TypeError(`'${iterable.type}' object is not iterable`, line, column);
+          throw new TypeError(`'${pyTypeName(iterable)}' object is not iterable`, line, column);
         }
         return pyNone();
       },
@@ -652,7 +670,7 @@ export function getDictMethod(obj: PyValue & { type: 'dict' }, attr: string, lin
             dictSet(dict, k, v);
           }
         } else {
-          throw new TypeError(`'${other.type}' object is not a mapping`, line, column);
+          throw new TypeError(`'${pyTypeName(other)}' object is not a mapping`, line, column);
         }
         return pyNone();
       },
@@ -859,5 +877,5 @@ export function getHashableItems(value: PyValue, line: number, column: number): 
     return dictKeys(value);
   }
 
-  throw new TypeError(`'${value.type}' object is not iterable`, line, column);
+  throw new TypeError(`'${pyTypeName(value)}' object is not iterable`, line, column);
 }

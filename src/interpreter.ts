@@ -45,6 +45,7 @@ import {
   pyEquals,
   pyStr,
   pyRepr,
+  pyTypeName,
   jsToValue,
   valueToJs,
   pyDatetime,
@@ -76,6 +77,10 @@ import {
   ModuleNotFoundError,
   OverflowError,
   StatisticsError,
+  TimeoutError,
+  MemoryError,
+  RuntimeError,
+  ToolError,
 } from './errors';
 import {
   createDatetimeModule,
@@ -89,6 +94,7 @@ import {
 } from './datetime';
 import { mathModule } from './math';
 import { statisticsModule } from './statistics';
+import { reModule } from './re';
 import { parse } from './parser';
 
 // ── Sync/async plumbing ─────────────────────────────────────────────────────
@@ -167,10 +173,49 @@ function exprContainsYield(expr: Expression): boolean {
 
 // ── Public types ────────────────────────────────────────────────────────────
 
+/** Metadata for one tool parameter, used by generateToolsPrompt to render a
+ *  Python-style signature. Purely descriptive — nothing is validated against it. */
+export interface ToolParameter {
+  name: string;
+  /** Python type shown in the signature, e.g. 'str', 'int', 'list[dict]'. */
+  type?: string;
+  /** Rendered verbatim as the default value, e.g. '"USD"' or 'None'.
+   *  A parameter with a default is implicitly optional. */
+  default?: string;
+  description?: string;
+}
+
 export interface ToolDefinition {
   name: string;
   description?: string;
+  /**
+   * Called with the script's positional arguments (marshalled to plain JS
+   * values) followed by ONE trailing kwargs object — always present when the
+   * call site uses keyword arguments, `{}` included for zero-arg calls:
+   *   f()          → handler({})
+   *   f("a")       → handler("a", {})
+   *   f("a", x=1)  → handler("a", { x: 1 })
+   * Note the ambiguity: a final positional dict is indistinguishable from
+   * kwargs. Prefer keyword-only tools or put dicts first.
+   * A thrown JS error surfaces in Python as a catchable ToolError.
+   */
   handler: (...args: any[]) => any | Promise<any>;
+  /** Parameter metadata for generateToolsPrompt (signatures + per-arg docs). */
+  parameters?: ToolParameter[];
+  /** Section heading used by generateToolsPrompt to group large tool sets. */
+  group?: string;
+}
+
+/** Crude allocation bounds — they fail the script with MemoryError instead of
+ *  letting a `[0] * 10**9` OOM the host process. Enforced on the operations
+ *  that can allocate large results in one step (sequence repetition and
+ *  concatenation, range(), str.join, the width-padding string methods); not
+ *  precise accounting. */
+export interface ResourceLimits {
+  /** Maximum length of any single string, in characters. Default 10_000_000. */
+  maxStringLength?: number;
+  /** Maximum number of elements in any single list/tuple/range. Default 10_000_000. */
+  maxCollectionSize?: number;
 }
 
 export interface InterpreterOptions {
@@ -179,6 +224,12 @@ export interface InterpreterOptions {
   onChart?: (options: { type: string; data: unknown[]; x: string; y: string | string[]; title?: string }) => void;
   onTable?: (options: { data: unknown[]; columns: Array<{ key: string; label: string; format?: string }>; title?: string }) => void;
   maxIterations?: number;
+  /** Wall-clock deadline for run(), including time spent inside awaited tool
+   *  handlers (which maxIterations cannot bound). Raises an uncatchable
+   *  TimeoutError. Default: no limit. */
+  timeoutMs?: number;
+  /** Allocation bounds; see ResourceLimits. Pass Infinity to disable one. */
+  limits?: ResourceLimits;
   /** Clock used by datetime.now() / date.today(), in epoch milliseconds. Defaults to Date.now. */
   now?: () => number;
   /** IANA timezone (e.g. 'Europe/Berlin') the sandboxed code appears to run in. Defaults to 'UTC'. */
@@ -193,6 +244,10 @@ export class Interpreter {
   private builtins: Map<string, PyBuiltin>;
   private maxIterations: number;
   private iterationCount: number = 0;
+  private timeoutMs?: number;
+  private deadline: number = Infinity;
+  private maxStringLength: number;
+  private maxCollectionSize: number;
   private onPrint?: PrintCallback;
   private modules: Map<string, PyModule>;
   /** Converts JS Dates from tool results into naive datetimes in the
@@ -203,6 +258,9 @@ export class Interpreter {
     this.globals = new Environment();
     this.tools = new Map();
     this.maxIterations = options.maxIterations ?? 5_000_000;
+    this.timeoutMs = options.timeoutMs;
+    this.maxStringLength = options.limits?.maxStringLength ?? 10_000_000;
+    this.maxCollectionSize = options.limits?.maxCollectionSize ?? 10_000_000;
     this.onPrint = options.onPrint;
     const toSessionTz = makeTzConverter(options.timezone ?? 'UTC');
     this.convertDate = (date) => pyDatetime(toSessionTz(date.getTime()));
@@ -213,11 +271,13 @@ export class Interpreter {
       ['datetime', createDatetimeModule(options.now ?? Date.now, options.timezone ?? 'UTC')],
       ['math', mathModule],
       ['statistics', statisticsModule],
+      ['re', reModule],
     ]);
     this.builtins = createBuiltins({
       onPrint: options.onPrint,
       onChart: options.onChart,
       onTable: options.onTable,
+      maxCollectionSize: this.maxCollectionSize,
     });
 
     if (options.tools) {
@@ -230,6 +290,7 @@ export class Interpreter {
 
   async run(source: string): Promise<any> {
     this.iterationCount = 0;
+    this.deadline = this.timeoutMs !== undefined ? Date.now() + this.timeoutMs : Infinity;
     const program = parse(source.trim());
     const r = this.executeBlock(program, this.globals);
     const result = r instanceof Promise ? await r : r;
@@ -358,6 +419,9 @@ export class Interpreter {
               case 'ModuleNotFoundError': throw new ModuleNotFoundError(msg, stmt.line, stmt.column);
               case 'OverflowError': throw new OverflowError(msg, stmt.line, stmt.column);
               case 'StatisticsError': throw new StatisticsError(msg, stmt.line, stmt.column);
+              case 'RuntimeError': throw new RuntimeError(msg, stmt.line, stmt.column);
+              case 'MemoryError': throw new MemoryError(msg, stmt.line, stmt.column);
+              case 'ToolError': throw new ToolError(msg, stmt.line, stmt.column);
               default: throw new InterpreterError(msg, stmt.line, stmt.column);
             }
           }
@@ -451,7 +515,7 @@ export class Interpreter {
         } else if (isString(value)) {
           items = value.value.split('').map(c => pyString(c));
         } else {
-          throw new TypeError(`cannot unpack non-sequence ${value.type}`, target.line, target.column);
+          throw new TypeError(`cannot unpack non-iterable ${pyTypeName(value)} object`, target.line, target.column);
         }
 
         const starIdx = elements.findIndex(e => e.type === 'Starred');
@@ -489,7 +553,7 @@ export class Interpreter {
             } else if (isDict(obj)) {
               dictSet(obj, index, value, target.line, target.column);
             } else {
-              throw new TypeError(`'${obj.type}' object does not support item assignment`, target.line, target.column);
+              throw new TypeError(`'${pyTypeName(obj)}' object does not support item assignment`, target.line, target.column);
             }
           })
         );
@@ -499,13 +563,13 @@ export class Interpreter {
           if (isDict(obj)) {
             dictSet(obj, pyString(target.attr), value);
           } else {
-            throw new TypeError(`'${obj.type}' object does not support attribute assignment`, target.line, target.column);
+            throw new TypeError(`'${pyTypeName(obj)}' object does not support attribute assignment`, target.line, target.column);
           }
         });
 
       case 'Slice':
         return $(this.evaluate(target.object, env), obj => {
-          if (!isList(obj)) throw new TypeError(`'${obj.type}' object does not support slice assignment`, target.line, target.column);
+          if (!isList(obj)) throw new TypeError(`'${pyTypeName(obj)}' object does not support slice assignment`, target.line, target.column);
           const evalLower = target.lower ? this.evaluate(target.lower, env) : null;
           const cont = (lower: PyValue | null) => {
             const evalUpper = target.upper ? this.evaluate(target.upper, env) : null;
@@ -630,7 +694,7 @@ export class Interpreter {
             } else if (isDict(obj)) {
               if (!dictDelete(obj, index, target.line, target.column)) throw new KeyError(pyRepr(index), target.line, target.column);
             } else {
-              throw new TypeError(`'${obj.type}' object does not support item deletion`, target.line, target.column);
+              throw new TypeError(`'${pyTypeName(obj)}' object does not support item deletion`, target.line, target.column);
             }
           })
         );
@@ -667,21 +731,32 @@ export class Interpreter {
             acceptsKwargs: true,
             fn: async (...args: PyValue[]) => {
               const tool = this.tools.get(expr.name)!;
+              let jsArgs: any[];
               const lastArg = args[args.length - 1];
               if (lastArg && isKwargsValue(lastArg)) {
-                const kwargsArg = lastArg;
                 const positionalArgs = args.slice(0, -1).map(valueToJs);
                 const options: Record<string, any> = {};
-                for (const key of Object.keys(kwargsArg.values)) {
-                  options[key] = valueToJs(kwargsArg.values[key]);
+                for (const key of Object.keys(lastArg.values)) {
+                  options[key] = valueToJs(lastArg.values[key]);
                 }
-                if (positionalArgs.length === 0) {
-                  return jsToValue(await tool.handler(options), this.convertDate);
-                } else {
-                  return jsToValue(await tool.handler(...positionalArgs, options), this.convertDate);
-                }
+                jsArgs = [...positionalArgs, options];
+              } else {
+                jsArgs = args.map(valueToJs);
               }
-              return jsToValue(await tool.handler(...args.map(valueToJs)), this.convertDate);
+              let result: any;
+              try {
+                result = await tool.handler(...jsArgs);
+              } catch (e) {
+                // A JS throw surfaces as a Python-catchable ToolError so
+                // scripts can implement fallbacks; position is stamped at
+                // the call site.
+                if (e instanceof InterpreterError) throw e;
+                const msg = e instanceof Error ? e.message : String(e);
+                throw new ToolError(`Tool '${tool.name}' failed: ${msg}`, 0, 0);
+              }
+              // maxIterations can't bound time spent awaiting a handler.
+              this.checkDeadline(0, 0);
+              return jsToValue(result, this.convertDate);
             },
           };
         }
@@ -1093,7 +1168,7 @@ export class Interpreter {
 
     const gen = generators[index];
     return $(this.evaluate(gen.iter, env), iter => {
-      const items = this.getIterableItems(iter, 0, 0);
+      const items = this.getIterableItems(iter, gen.iter.line, gen.iter.column);
       return this.comprehensionLoop(items, 0, gen, generators, index, env, callback);
     });
   }
@@ -1104,7 +1179,7 @@ export class Interpreter {
     env: Environment, callback: (env: Environment) => MA<void>
   ): MA<void> {
     for (; i < items.length; i++) {
-      this.checkIterations(0, 0);
+      this.checkIterations(gen.iter.line, gen.iter.column);
       const innerEnv = new Environment(env);
       const ar = this.assignTarget(gen.target, items[i], innerEnv);
       if (ar instanceof Promise) {
@@ -1123,7 +1198,7 @@ export class Interpreter {
           }
           // Continue remaining iterations async
           for (let j = ii + 1; j < items.length; j++) {
-            this.checkIterations(0, 0);
+            this.checkIterations(gen.iter.line, gen.iter.column);
             const ie = new Environment(env);
             const ar2 = this.assignTarget(gen.target, items[j], ie);
             if (ar2 instanceof Promise) await ar2;
@@ -1153,7 +1228,7 @@ export class Interpreter {
             }
             // Continue remaining
             for (let j = ii + 1; j < items.length; j++) {
-              this.checkIterations(0, 0);
+              this.checkIterations(gen.iter.line, gen.iter.column);
               const ie = new Environment(env);
               const ar2 = this.assignTarget(gen.target, items[j], ie);
               if (ar2 instanceof Promise) await ar2;
@@ -1177,7 +1252,7 @@ export class Interpreter {
           const ii = i;
           return r.then(async () => {
             for (let j = ii + 1; j < items.length; j++) {
-              this.checkIterations(0, 0);
+              this.checkIterations(gen.iter.line, gen.iter.column);
               const ie = new Environment(env);
               const ar2 = this.assignTarget(gen.target, items[j], ie);
               if (ar2 instanceof Promise) await ar2;
@@ -1200,64 +1275,84 @@ export class Interpreter {
   // ── Operators ─────────────────────────────────────────────────────────────
 
   private binaryOp(op: string, left: PyValue, right: PyValue, line: number, column: number): PyValue {
+    // Fast path: plain numbers, the overwhelmingly common case. Kept tiny so
+    // it inlines into the evaluator's hot loop.
+    if (isNumber(left) && isNumber(right)) {
+      const r = this.numericOp(op, left.value, right.value, line, column);
+      if (r !== null) return r;
+    }
+    return this.binaryOpSlow(op, left, right, line, column);
+  }
+
+  private numericOp(op: string, a: number, b: number, line: number, column: number): PyValue | null {
+    switch (op) {
+      case '+': return pyNumber(a + b);
+      case '-': return pyNumber(a - b);
+      case '*': return pyNumber(a * b);
+      case '/':
+        if (b === 0) throw new ZeroDivisionError(line, column);
+        return pyNumber(a / b);
+      case '//':
+        if (b === 0) throw new ZeroDivisionError(line, column);
+        return pyNumber(Math.floor(a / b));
+      case '%':
+        if (b === 0) throw new ZeroDivisionError(line, column);
+        return pyNumber(((a % b) + b) % b);
+      case '**': return pyNumber(Math.pow(a, b));
+      case '&': return pyNumber(Math.trunc(a) & Math.trunc(b));
+      case '|': return pyNumber(Math.trunc(a) | Math.trunc(b));
+      case '^': return pyNumber(Math.trunc(a) ^ Math.trunc(b));
+      case '<<': return pyNumber(Math.trunc(a) << Math.trunc(b));
+      case '>>': return pyNumber(Math.trunc(a) >> Math.trunc(b));
+      default: return null;
+    }
+  }
+
+  private binaryOpSlow(op: string, left: PyValue, right: PyValue, line: number, column: number): PyValue {
     if (isBoolean(left) && (isNumber(right) || isBoolean(right))) {
       left = pyNumber(left.value ? 1 : 0);
     }
     if (isBoolean(right) && (isNumber(left) || isBoolean(right))) {
       right = pyNumber(right.value ? 1 : 0);
     }
-    if (op === '+' && isString(left) && isString(right)) return pyString(left.value + right.value);
-    if (op === '%' && isString(left)) {
-      const values: PyValue[] = isTuple(right) ? right.elements : [right];
-      let i = 0;
-      const result = left.value.replace(/%([+-]?\d*\.?\d*[sdifr%oxXe])/g, (match, spec) => {
-        if (spec === '%') return '%';
-        const val = values[i++];
-        const typeChar = spec[spec.length - 1];
-        switch (typeChar) {
-          case 's': return pyStr(val);
-          case 'r': return pyRepr(val);
-          case 'd': case 'i': return String(Math.trunc(isNumber(val) ? val.value : 0));
-          case 'f': return (isNumber(val) ? val.value : 0).toFixed(spec.match(/\.(\d+)/)?.[1] ? parseInt(spec.match(/\.(\d+)/)![1]) : 6);
-          case 'o': return Math.trunc(isNumber(val) ? val.value : 0).toString(8);
-          case 'x': return Math.trunc(isNumber(val) ? val.value : 0).toString(16);
-          case 'X': return Math.trunc(isNumber(val) ? val.value : 0).toString(16).toUpperCase();
-          case 'e': return (isNumber(val) ? val.value : 0).toExponential(spec.match(/\.(\d+)/)?.[1] ? parseInt(spec.match(/\.(\d+)/)![1]) : 6);
-          default: return match;
-        }
-      });
-      return pyString(result);
+    if (isNumber(left) && isNumber(right)) {
+      const r = this.numericOp(op, left.value, right.value, line, column);
+      if (r !== null) return r;
     }
-    if (op === '*' && isString(left) && isNumber(right)) return pyString(left.value.repeat(Math.max(0, Math.floor(right.value))));
-    if (op === '*' && isNumber(left) && isString(right)) return pyString(right.value.repeat(Math.max(0, Math.floor(left.value))));
-    if (op === '+' && isList(left) && isList(right)) return pyList([...left.elements, ...right.elements]);
-    if (op === '+' && isTuple(left) && isTuple(right)) return pyTuple([...left.elements, ...right.elements]);
+    if (op === '+' && isString(left) && isString(right)) {
+      if (left.value.length + right.value.length > this.maxStringLength) {
+        throw new MemoryError(`result exceeds the maximum string length (${this.maxStringLength} characters)`, line, column);
+      }
+      return pyString(left.value + right.value);
+    }
+    if (op === '%' && isString(left)) {
+      return this.percentFormat(left.value, right);
+    }
+    if (op === '*' && isString(left) && isNumber(right)) {
+      return pyString(left.value.repeat(this.checkedRepeatCount(left.value.length, right.value, this.maxStringLength, 'string length', 'characters', line, column)));
+    }
+    if (op === '*' && isNumber(left) && isString(right)) {
+      return pyString(right.value.repeat(this.checkedRepeatCount(right.value.length, left.value, this.maxStringLength, 'string length', 'characters', line, column)));
+    }
+    if (op === '+' && isList(left) && isList(right)) {
+      this.checkCollectionSize(left.elements.length + right.elements.length, line, column);
+      return pyList([...left.elements, ...right.elements]);
+    }
+    if (op === '+' && isTuple(left) && isTuple(right)) {
+      this.checkCollectionSize(left.elements.length + right.elements.length, line, column);
+      return pyTuple([...left.elements, ...right.elements]);
+    }
     if (op === '*' && isList(left) && isNumber(right)) {
+      const n = this.checkedRepeatCount(left.elements.length, right.value, this.maxCollectionSize, 'collection size', 'elements', line, column);
       const result: PyValue[] = [];
-      for (let i = 0; i < Math.max(0, Math.floor(right.value)); i++) result.push(...left.elements);
+      for (let i = 0; i < n; i++) result.push(...left.elements);
       return pyList(result);
     }
-    if (isNumber(left) && isNumber(right)) {
-      switch (op) {
-        case '+': return pyNumber(left.value + right.value);
-        case '-': return pyNumber(left.value - right.value);
-        case '*': return pyNumber(left.value * right.value);
-        case '/':
-          if (right.value === 0) throw new ZeroDivisionError(line, column);
-          return pyNumber(left.value / right.value);
-        case '//':
-          if (right.value === 0) throw new ZeroDivisionError(line, column);
-          return pyNumber(Math.floor(left.value / right.value));
-        case '%':
-          if (right.value === 0) throw new ZeroDivisionError(line, column);
-          return pyNumber(((left.value % right.value) + right.value) % right.value);
-        case '**': return pyNumber(Math.pow(left.value, right.value));
-        case '&': return pyNumber(Math.trunc(left.value) & Math.trunc(right.value));
-        case '|': return pyNumber(Math.trunc(left.value) | Math.trunc(right.value));
-        case '^': return pyNumber(Math.trunc(left.value) ^ Math.trunc(right.value));
-        case '<<': return pyNumber(Math.trunc(left.value) << Math.trunc(right.value));
-        case '>>': return pyNumber(Math.trunc(left.value) >> Math.trunc(right.value));
-      }
+    if (op === '*' && isTuple(left) && isNumber(right)) {
+      const n = this.checkedRepeatCount(left.elements.length, right.value, this.maxCollectionSize, 'collection size', 'elements', line, column);
+      const result: PyValue[] = [];
+      for (let i = 0; i < n; i++) result.push(...left.elements);
+      return pyTuple(result);
     }
     if ((op === '+' || op === '-' || op === '*') &&
         (isNumber(left) || isNone(left)) && (isNumber(right) || isNone(right))) {
@@ -1288,7 +1383,30 @@ export class Interpreter {
       const result = datetimeBinaryOp(op, left, right, line, column);
       if (result) return result;
     }
-    throw new TypeError(`unsupported operand type(s) for ${op}: '${left.type}' and '${right.type}'`, line, column);
+    throw new TypeError(`unsupported operand type(s) for ${op}: '${pyTypeName(left)}' and '${pyTypeName(right)}'`, line, column);
+  }
+
+  /** Python's printf-style `%` string formatting. */
+  private percentFormat(format: string, right: PyValue): PyValue {
+    const values: PyValue[] = isTuple(right) ? right.elements : [right];
+    let i = 0;
+    const result = format.replace(/%([+-]?\d*\.?\d*[sdifr%oxXe])/g, (match, spec) => {
+      if (spec === '%') return '%';
+      const val = values[i++];
+      const typeChar = spec[spec.length - 1];
+      switch (typeChar) {
+        case 's': return pyStr(val);
+        case 'r': return pyRepr(val);
+        case 'd': case 'i': return String(Math.trunc(isNumber(val) ? val.value : 0));
+        case 'f': return (isNumber(val) ? val.value : 0).toFixed(spec.match(/\.(\d+)/)?.[1] ? parseInt(spec.match(/\.(\d+)/)![1]) : 6);
+        case 'o': return Math.trunc(isNumber(val) ? val.value : 0).toString(8);
+        case 'x': return Math.trunc(isNumber(val) ? val.value : 0).toString(16);
+        case 'X': return Math.trunc(isNumber(val) ? val.value : 0).toString(16).toUpperCase();
+        case 'e': return (isNumber(val) ? val.value : 0).toExponential(spec.match(/\.(\d+)/)?.[1] ? parseInt(spec.match(/\.(\d+)/)![1]) : 6);
+        default: return match;
+      }
+    });
+    return pyString(result);
   }
 
   private unaryOp(op: string, operand: PyValue, line: number, column: number): PyValue {
@@ -1296,14 +1414,14 @@ export class Interpreter {
       case '-':
         if (isNumber(operand)) return pyNumber(-operand.value);
         if (operand.type === 'timedelta') return negateTimedelta(operand);
-        throw new TypeError(`bad operand type for unary -: '${operand.type}'`, line, column);
+        throw new TypeError(`bad operand type for unary -: '${pyTypeName(operand)}'`, line, column);
       case '+':
         if (isNumber(operand)) return operand;
         if (operand.type === 'timedelta') return operand;
-        throw new TypeError(`bad operand type for unary +: '${operand.type}'`, line, column);
+        throw new TypeError(`bad operand type for unary +: '${pyTypeName(operand)}'`, line, column);
       case '~':
         if (isNumber(operand)) return pyNumber(~Math.trunc(operand.value));
-        throw new TypeError(`bad operand type for unary ~: '${operand.type}'`, line, column);
+        throw new TypeError(`bad operand type for unary ~: '${pyTypeName(operand)}'`, line, column);
       case 'not':
         return pyBoolean(!isTruthy(operand));
       default:
@@ -1316,34 +1434,24 @@ export class Interpreter {
       case '==': return pyEquals(left, right);
       case '!=': return !pyEquals(left, right);
       case '<': case '>': case '<=': case '>=':
-        if (isNumber(left) && isNumber(right)) {
-          switch (op) {
-            case '<': return left.value < right.value;
-            case '>': return left.value > right.value;
-            case '<=': return left.value <= right.value;
-            case '>=': return left.value >= right.value;
-          }
-        }
-        if (isString(left) && isString(right)) {
-          switch (op) {
-            case '<': return left.value < right.value;
-            case '>': return left.value > right.value;
-            case '<=': return left.value <= right.value;
-            case '>=': return left.value >= right.value;
-          }
-        }
-        if (isDatetimeLike(left) || isDatetimeLike(right)) {
-          const cmp = datetimeOrdering(left, right, line, column);
-          if (cmp !== null) {
+        {
+          // Fast path: plain numbers, the overwhelmingly common case.
+          if (isNumber(left) && isNumber(right)) {
             switch (op) {
-              case '<': return cmp < 0;
-              case '>': return cmp > 0;
-              case '<=': return cmp <= 0;
-              case '>=': return cmp >= 0;
+              case '<': return left.value < right.value;
+              case '>': return left.value > right.value;
+              case '<=': return left.value <= right.value;
+              case '>=': return left.value >= right.value;
             }
           }
+          const cmp = compareValues(left, right, op, line, column);
+          switch (op) {
+            case '<': return cmp < 0;
+            case '>': return cmp > 0;
+            case '<=': return cmp <= 0;
+            default: return cmp >= 0;
+          }
         }
-        throw new TypeError(`'${op}' not supported between '${left.type}' and '${right.type}'`, line, column);
       case 'in': return this.contains(right, left, line, column);
       case 'not in': return !this.contains(right, left, line, column);
       case 'is':
@@ -1371,22 +1479,36 @@ export class Interpreter {
     if (isSet(container)) {
       return setHas(container, item, line, column);
     }
-    throw new TypeError(`argument of type '${container.type}' is not iterable`, line, column);
+    throw new TypeError(`argument of type '${pyTypeName(container)}' is not iterable`, line, column);
   }
 
   // ── Function call ─────────────────────────────────────────────────────────
 
   private call(func: PyValue, args: PyValue[], kwargs: Record<string, PyValue>, line: number, column: number): MA<PyValue> {
     if (func.type === 'builtin') {
-      if ((func as any).requiresInterpreter) {
-        return this.handleSpecialBuiltin(func.name, args, kwargs, line, column);
+      // Builtins throw with no position info (Line 0, Column 0); stamp the
+      // call site onto those so the model can anchor its self-correction.
+      const stampPos = (e: unknown): never => {
+        if (e instanceof InterpreterError && e.line === 0 && e.column === 0) {
+          e.line = line;
+          e.column = column;
+          e.message = `Line ${line}, Column ${column}: ${e.baseMessage}`;
+        }
+        throw e;
+      };
+      try {
+        let r: MA<PyValue>;
+        if ((func as any).requiresInterpreter) {
+          r = this.handleSpecialBuiltin(func.name, args, kwargs, line, column);
+        } else if (func.acceptsKwargs) {
+          r = func.fn(...args, { type: 'kwargs' as const, values: kwargs });
+        } else {
+          r = func.fn(...args);
+        }
+        return r instanceof Promise ? r.catch(stampPos) : r;
+      } catch (e) {
+        stampPos(e);
       }
-      if (func.acceptsKwargs) {
-        const r = func.fn(...args, { type: 'kwargs' as const, values: kwargs });
-        return r instanceof Promise ? r : r;
-      }
-      const r = func.fn(...args);
-      return r instanceof Promise ? r : r;
     }
 
     if (func.type === 'function') {
@@ -1434,7 +1556,7 @@ export class Interpreter {
       return this.callBound(func, funcEnv, args, kwargs, usedKwargs, line, column);
     }
 
-    throw new TypeError(`'${func.type}' object is not callable`, line, column);
+    throw new TypeError(`'${pyTypeName(func)}' object is not callable`, line, column);
   }
 
   private callBound(
@@ -1706,7 +1828,12 @@ export class Interpreter {
   }
 
   private tryCatch(stmt: Statement & { type: 'Try' }, error: any, env: Environment): MA<PyValue> {
-    if (error instanceof ReturnException || error instanceof BreakException || error instanceof ContinueException) {
+    // MaxIterationsError / TimeoutError bypass handlers (including bare
+    // `except:`) — otherwise a try/except inside a loop would neutralize the
+    // host's resource bounds. They propagate like control flow: finally still
+    // runs, but nothing can catch them.
+    if (error instanceof ReturnException || error instanceof BreakException || error instanceof ContinueException ||
+        error instanceof MaxIterationsError || error instanceof TimeoutError) {
       if (stmt.finalbody.length > 0) {
         const r = this.executeBlock(stmt.finalbody, env);
         if (r instanceof Promise) return r.then(() => { throw error; });
@@ -1798,7 +1925,7 @@ export class Interpreter {
         else if (isString(iterable)) items = iterable.value.split('').map(c => pyString(c));
         else if (isDict(iterable)) items = dictKeys(iterable);
         else if (isSet(iterable)) items = setValues(iterable);
-        else throw new TypeError(`'${iterable.type}' object is not iterable`, line, column);
+        else throw new TypeError(`'${pyTypeName(iterable)}' object is not iterable`, line, column);
         const keyFunc = kwargs.key;
         const reverse = kwargs.reverse?.type === 'boolean' && (kwargs.reverse as any).value;
         if (keyFunc && (keyFunc.type === 'function' || keyFunc.type === 'builtin')) {
@@ -1851,7 +1978,7 @@ export class Interpreter {
         if (isList(iterable) || isTuple(iterable)) items = iterable.elements;
         else if (iterable.type === 'iterator') items = iterable.values;
         else if (isString(iterable)) items = iterable.value.split('').map(c => pyString(c));
-        else throw new TypeError(`'${iterable.type}' object is not iterable`, line, column);
+        else throw new TypeError(`'${pyTypeName(iterable)}' object is not iterable`, line, column);
         const results: PyValue[] = [];
         for (const item of items) {
           const r = this.call(func, [item], {}, line, column);
@@ -1867,7 +1994,7 @@ export class Interpreter {
         if (isList(iterable) || isTuple(iterable)) items = iterable.elements;
         else if (iterable.type === 'iterator') items = iterable.values;
         else if (isString(iterable)) items = iterable.value.split('').map(c => pyString(c));
-        else throw new TypeError(`'${iterable.type}' object is not iterable`, line, column);
+        else throw new TypeError(`'${pyTypeName(iterable)}' object is not iterable`, line, column);
         const results: PyValue[] = [];
         for (const item of items) {
           let keep: boolean;
@@ -1893,7 +2020,7 @@ export class Interpreter {
           if (iter.index >= iter.values.length) { if (defaultVal !== undefined) return defaultVal; throw new StopIteration(line, column); }
           return iter.values[iter.index++];
         }
-        throw new TypeError(`'${iter.type}' object is not an iterator`, line, column);
+        throw new TypeError(`'${pyTypeName(iter)}' object is not an iterator`, line, column);
       }
 
       case 'list': {
@@ -1913,7 +2040,7 @@ export class Interpreter {
         } else if (isList(iterable) || isTuple(iterable)) items = iterable.elements;
         else if (iterable.type === 'iterator') items = iterable.values;
         else if (isString(iterable)) items = iterable.value.split('').map((c: string) => pyString(c));
-        else throw new TypeError(`'${iterable.type}' object is not iterable`, line, column);
+        else throw new TypeError(`'${pyTypeName(iterable)}' object is not iterable`, line, column);
         const startVal = kwargs.start && isNumber(kwargs.start) ? (kwargs.start as any).value
           : (args[1] && isNumber(args[1]) ? (args[1] as any).value : 0);
         return pyIterator(items.map((item, i) => pyList([pyNumber(i + startVal), item])));
@@ -2000,7 +2127,7 @@ export class Interpreter {
       if (value === undefined) throw new KeyError(pyStr(index), line, column);
       return value;
     }
-    throw new TypeError(`'${obj.type}' object is not subscriptable`, line, column);
+    throw new TypeError(`'${pyTypeName(obj)}' object is not subscriptable`, line, column);
   }
 
   private slice(obj: PyValue, lower: PyValue | null, upper: PyValue | null, step: PyValue | null, line: number, column: number): PyValue {
@@ -2027,7 +2154,7 @@ export class Interpreter {
       else { for (let i = s; i > e; i += stepVal) result += obj.value[i]; }
       return pyString(result);
     }
-    throw new TypeError(`'${obj.type}' object is not subscriptable`, line, column);
+    throw new TypeError(`'${pyTypeName(obj)}' object is not subscriptable`, line, column);
   }
 
   private normalizeSliceIndices(start: number | undefined, end: number | undefined, step: number, len: number): [number, number] {
@@ -2050,7 +2177,7 @@ export class Interpreter {
   }
 
   private getAttribute(obj: PyValue, attr: string, line: number, column: number): PyValue {
-    if (isString(obj)) return getStringMethod(obj, attr, line, column);
+    if (isString(obj)) return getStringMethod(obj, attr, line, column, this.maxStringLength);
     if (isList(obj)) return getListMethod(obj, attr, line, column);
     if (isDict(obj)) return getDictMethod(obj, attr, line, column);
     if (isSet(obj)) return getSetMethod(obj, attr, line, column);
@@ -2101,7 +2228,7 @@ export class Interpreter {
           if (isList(keys) || isTuple(keys)) items = keys.elements;
           else if (keys.type === 'iterator') items = keys.values;
           else if (isString(keys)) items = keys.value.split('').map((c: string) => pyString(c));
-          else throw new TypeError(`'${keys.type}' object is not iterable`, line, column);
+          else throw new TypeError(`'${pyTypeName(keys)}' object is not iterable`, line, column);
           const dict = pyDict();
           for (const item of items) {
             dictSet(dict, item, defaultVal, line, column);
@@ -2110,7 +2237,7 @@ export class Interpreter {
         },
       };
     }
-    throw new TypeError(`'${obj.type}' object has no attribute '${attr}'`, line, column);
+    throw new TypeError(`'${pyTypeName(obj)}' object has no attribute '${attr}'`, line, column);
   }
 
   private getIterableItems(value: PyValue, line: number, column: number): PyValue[] {
@@ -2123,7 +2250,7 @@ export class Interpreter {
     if (isSet(value)) {
       return setValues(value);
     }
-    throw new TypeError(`'${value.type}' object is not iterable`, line, column);
+    throw new TypeError(`'${pyTypeName(value)}' object is not iterable`, line, column);
   }
 
   private async exhaustGenerator(gen: PyGenerator): Promise<PyValue> {
@@ -2145,12 +2272,43 @@ export class Interpreter {
   private checkIterations(line: number, column: number): void {
     this.iterationCount++;
     if (this.iterationCount > this.maxIterations) throw new MaxIterationsError(line, column);
+    // Date.now() every iteration would dominate tight loops; sample every
+    // 8192 iterations, outlined so this hot method stays small enough to
+    // inline.
+    if ((this.iterationCount & 8191) === 0) this.checkDeadline(line, column);
+  }
+
+  private checkDeadline(line: number, column: number): void {
+    if (Date.now() > this.deadline) throw new TimeoutError(this.timeoutMs!, line, column);
+  }
+
+  /** Validates `unit * count` repetition against a limit BEFORE allocating.
+   *  Returns the clamped-to-int repeat count (Python floors and treats
+   *  negatives as 0). */
+  private checkedRepeatCount(
+    unitLen: number, count: number, limit: number,
+    kind: string, units: string, line: number, column: number
+  ): number {
+    const n = Math.max(0, Math.floor(count));
+    if (unitLen * n > limit) {
+      throw new MemoryError(`result exceeds the maximum ${kind} (${limit} ${units})`, line, column);
+    }
+    return n;
+  }
+
+  private checkCollectionSize(size: number, line: number, column: number): void {
+    if (size > this.maxCollectionSize) {
+      throw new MemoryError(`result exceeds the maximum collection size (${this.maxCollectionSize} elements)`, line, column);
+    }
   }
 
   private exceptionMatches(error: Error, exceptionTypes: string[] | null): boolean {
     if (exceptionTypes === null) return true;
     const errorTypeMap: Record<string, string[]> = {
-      'Exception': ['TypeError', 'NameError', 'KeyError', 'IndexError', 'ZeroDivisionError', 'ValueError', 'SyntaxError', 'AttributeError', 'StopIteration', 'InterpreterError', 'ImportError', 'ModuleNotFoundError', 'OverflowError', 'StatisticsError'],
+      'Exception': ['TypeError', 'NameError', 'KeyError', 'IndexError', 'ZeroDivisionError', 'ValueError', 'SyntaxError', 'AttributeError', 'StopIteration', 'InterpreterError', 'ImportError', 'ModuleNotFoundError', 'OverflowError', 'StatisticsError', 'RuntimeError', 'ToolError', 'MemoryError'],
+      'RuntimeError': ['RuntimeError', 'ToolError'],
+      'ToolError': ['ToolError'],
+      'MemoryError': ['MemoryError'],
       'ImportError': ['ImportError', 'ModuleNotFoundError'],
       'ModuleNotFoundError': ['ModuleNotFoundError'],
       'OverflowError': ['OverflowError'],

@@ -21,6 +21,7 @@ import {
   isTuple,
   isSet,
   setValues,
+  pyTypeName,
 } from './values';
 import { extractKwargs } from './builtins';
 import { TypeError, ValueError, StatisticsError } from './errors';
@@ -32,7 +33,7 @@ function iterableElements(data: PyValue, caller: string): PyValue[] {
   if (isSet(data)) {
     return setValues(data);
   }
-  throw new TypeError(`${caller}: '${data.type}' object is not iterable`, 0, 0);
+  throw new TypeError(`${caller}: '${pyTypeName(data)}' object is not iterable`, 0, 0);
 }
 
 function extractData(data: PyValue, caller: string): number[] {
@@ -110,7 +111,7 @@ function createStatisticsModule(): PyModule {
       const counts = new Map<string, { value: PyValue; count: number }>();
       for (const el of elements) {
         if (!isNumber(el) && !isString(el) && !isBoolean(el)) {
-          throw new TypeError(`unhashable type: '${el.type}'`, 0, 0);
+          throw new TypeError(`unhashable type: '${pyTypeName(el)}'`, 0, 0);
         }
         const key = `${el.type}:${el.value}`;
         const entry = counts.get(key);

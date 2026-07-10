@@ -97,13 +97,13 @@ const b = await interpreter.run(codeTwo);
 
 A quick overview — see [`FEATURES.md`](./FEATURES.md) for the authoritative list with TypeScript analogues for every feature.
 
-**Works:** numbers, strings, raw strings (`r"\d+"`), f-strings (including format specs and nested quotes), booleans (with int arithmetic), `None`, lists, tuples, dicts and sets (keys/members can be any hashable value, including tuples — `totals[(month, org)]` works), set literals and operators (`|`, `&`, `-`, `^`), comprehensions (list, dict, set), `if`/`elif`/`else`, `for`/`while` (with `else` clauses), `break`/`continue`/`pass`, `try`/`except`/`finally`, `raise`, function definitions with `*args`/`**kwargs` and defaults, closures, lambdas (including as keyword arguments), decorators, generators (`yield`, `yield from`, `next()`), chained assignment (`x = y = 5`), tuple unpacking, chained comparisons (`0 < x < 10`), slicing, `and`/`or`/`not`, bitwise operators, ternary expressions, walrus (`:=`), string/list/dict/set methods, the `datetime` module (`datetime`, `date`, `timedelta` — naive, with a host-configurable clock and session timezone), the `math` module (sqrt, floor/ceil, log family, trig, isclose, `pi`/`inf`/`nan`), the `statistics` module (mean, median, mode, stdev, quantiles), and ~40 built-ins (`len`, `range`, `sum`, `sorted`, `enumerate`, `zip`, `map`, `filter`, `any`, `all`, `print`, `iter`, `next`, `hash`, `id`, etc.).
+**Works:** numbers, strings, raw strings (`r"\d+"`), f-strings (including format specs and nested quotes), booleans (with int arithmetic), `None`, lists, tuples, dicts and sets (keys/members can be any hashable value, including tuples — `totals[(month, org)]` works), set literals and operators (`|`, `&`, `-`, `^`), comprehensions (list, dict, set), `if`/`elif`/`else`, `for`/`while` (with `else` clauses), `break`/`continue`/`pass`, `try`/`except`/`finally`, `raise`, function definitions with `*args`/`**kwargs` and defaults, closures, lambdas (including as keyword arguments), decorators, generators (`yield`, `yield from`, `next()`), chained assignment (`x = y = 5`), tuple unpacking, tuple/list lexicographic comparison, semicolon statement separators, chained comparisons (`0 < x < 10`), slicing, `and`/`or`/`not`, bitwise operators, ternary expressions, walrus (`:=`), string/list/dict/set methods, the `datetime` module (`datetime`, `date`, `timedelta` — naive, with a host-configurable clock and session timezone), the `math` module (sqrt, floor/ceil, log family, trig, isclose, `pi`/`inf`/`nan`), the `statistics` module (mean, median, mode, stdev, quantiles), the `re` module (search/match/findall/finditer/sub/split/compile, named groups, flags — JS-RegExp-backed, dialect caveats in `FEATURES.md`), and ~40 built-ins (`len`, `range`, `sum`, `sorted`, `enumerate`, `zip`, `map`, `filter`, `any`, `all`, `print`, `iter`, `next`, `hash`, `id`, etc.).
 
 ### Not supported
 
 | Feature | Reason |
 |---|---|
-| Modules other than `datetime`, `math`, `statistics` | **Safety.** There is no real module system — imports resolve against a built-in whitelist of pure-computation modules. Nothing importable touches the filesystem, network, or process. Everything else raises `ModuleNotFoundError`. |
+| Modules other than `datetime`, `math`, `statistics`, `re` | **Safety.** There is no real module system — imports resolve against a built-in whitelist of pure-computation modules. Nothing importable touches the filesystem, network, or process. Everything else raises `ModuleNotFoundError`. |
 | `exec` / `eval` / `compile` | **Safety.** Dynamic code execution would bypass the sandbox. |
 | `open` / filesystem I/O | **Safety.** No filesystem access. Data comes in through tools. |
 | `__import__` / `globals` / `locals` | **Safety.** Introspection escapes could leak or mutate interpreter state. |
@@ -114,6 +114,8 @@ A quick overview — see [`FEATURES.md`](./FEATURES.md) for the authoritative li
 | `input()` | **Not applicable.** There is no interactive stdin. Data should be passed in via tools. |
 | `str.encode()` / `bytes` type | **Not useful for agents.** Binary data handling is irrelevant in a text-processing sandbox. |
 | Default mutable argument sharing | **Intentional deviation.** In CPython, `def f(x=[]):` shares the list across calls — a well-known footgun. defanged creates a fresh default each call, which is safer for sandboxed use. |
+
+The constructs models emit anyway (`class`, `with`, `async`/`await`) fail at parse time with a targeted message — e.g. `class definitions are not supported in this sandbox — use dicts and functions instead` — so an LLM's retry loop converges instead of guessing at a generic `Unexpected token`.
 
 ---
 
@@ -129,15 +131,17 @@ A quick overview — see [`FEATURES.md`](./FEATURES.md) for the authoritative li
 | Dynamic code execution | Absent (no `exec`, `eval`, `compile`, `__import__`)      |
 | Module imports         | Absent (no module system)                                |
 | Introspection escape   | Absent (no `globals()`, `locals()`, `__dict__`)          |
-| Infinite loops / DoS   | Bounded by `maxIterations` (default 100,000)             |
-| Host memory exhaustion | **Not bounded** — validate tool inputs (see below)       |
-| Host CPU exhaustion    | **Bounded loosely** via iteration limit — not wall-clock |
+| Infinite loops / DoS   | Bounded by `maxIterations` (default 5,000,000) and `timeoutMs` (wall-clock, opt-in) |
+| Host memory exhaustion | Bounded by `limits` — single-step allocations (`[0] * 10**9`, `"x" * 10**9`, `range(10**9)`, `join`, `ljust`/`center`/`zfill`) fail with a Python `MemoryError` instead of OOMing the process |
+| Host CPU exhaustion    | Bounded by iteration limit + optional wall-clock deadline |
+
+Neither `MaxIterationsError` nor `TimeoutError` can be caught from Python — not even by a bare `except:` — so sandboxed code cannot neutralize the host's resource bounds.
 
 ### Residual risks (yours to own)
 
 1. **Tool handlers are trust boundaries.** Whatever a tool handler does with its arguments is on you. If a tool runs SQL, parameterize it. If a tool calls out to a system, validate inputs.
-2. **Memory.** `[0] * 10_000_000` is legal Python and `defanged` will happily allocate it. Put a memory budget on your Node/Bun process if you're running untrusted input.
-3. **Wall-clock.** Iteration-counting prevents infinite loops but does not cap wall-clock time. Run untrusted code in a worker with a timeout.
+2. **Memory bounding is crude, not precise accounting.** The `limits` caps guard the operations that can allocate huge results in one step. Many small allocations across millions of iterations are bounded only indirectly (by `maxIterations`); keep a process-level memory budget for hostile input.
+3. **Wall-clock enforcement has gaps.** The `timeoutMs` deadline is checked between operations and after each tool call — it cannot interrupt a single synchronous operation already in flight (e.g. a catastrophically backtracking `re` pattern, or a slow tool handler that never resolves). For hard real-time guarantees, run untrusted code in a worker you can kill.
 
 ---
 
@@ -153,7 +157,9 @@ Long-lived interpreter. Options:
 
 - `tools: ToolDefinition[]` — functions callable from Python
 - `onPrint: (msg: string) => void` — called for every `print()` invocation
-- `maxIterations: number` — loop iteration budget (default 100,000)
+- `maxIterations: number` — loop iteration budget (default 5,000,000)
+- `timeoutMs: number` — wall-clock deadline per `run()`, including time spent inside awaited tool handlers (which `maxIterations` cannot bound). Raises a `TimeoutError` that Python code cannot catch. Default: no limit — set one if your host runs on an event loop it can't block indefinitely.
+- `limits: { maxStringLength?, maxCollectionSize? }` — allocation caps (defaults: 10,000,000 characters / elements). Exceeding one raises a Python-catchable `MemoryError` instead of OOMing the host. Pass `Infinity` to disable.
 - `now: () => number` — clock for `datetime.now()` / `date.today()`, in epoch milliseconds (default `Date.now`)
 - `timezone: string` — IANA timezone the sandboxed code appears to run in, e.g. `'Europe/Berlin'` (default `'UTC'`). Affects `datetime.now()`, `date.today()`, and how `fromisoformat()` localizes `Z`/offset-suffixed timestamps; pass the end user's timezone so dates render in their local time. All datetimes stay naive — see `FEATURES.md` for the full model.
 
@@ -164,14 +170,47 @@ interface ToolDefinition {
   name: string;
   description?: string;
   handler: (...args: any[]) => any | Promise<any>;
+  parameters?: ToolParameter[]; // metadata for generateToolsPrompt
+  group?: string;               // section heading in generateToolsPrompt
 }
 ```
 
+**Calling convention.** Handlers receive the script's positional arguments (marshalled to plain JS values) followed by **one trailing kwargs object**, which is always present when the call uses keyword arguments and is `{}` for zero-argument calls:
+
+```python
+f()           # handler({})
+f("a")        # handler("a", {})
+f("a", x=1)   # handler("a", { x: 1 })
+```
+
+Note the ambiguity: a final positional dict is indistinguishable from kwargs. Prefer keyword-only tools, or put dict parameters first. (A cleaner `(args, kwargs)` signature is planned for 0.4.)
+
+**Errors.** A JS exception thrown (or rejected) by a handler surfaces in Python as a `ToolError` — catchable with `except ToolError`, `except RuntimeError`, or `except Exception` — so scripts can implement fallbacks. The message is `Tool '<name>' failed: <error.message>`.
+
 Return values marshal into Python values: arrays → lists, plain objects → dicts, `null`/`undefined` → `None`, and JS `Date` objects → naive `datetime` values in the session timezone (so timestamp columns from database drivers behave like `datetime.now()` output).
 
-### `generateToolsPrompt(tools)`
+### `generateToolsPrompt(tools, options?)`
 
-Produces a system-prompt fragment describing available tools, for use with Claude / other LLMs.
+Produces a system-prompt fragment describing available tools, for use with Claude / other LLMs. Tools with `parameters` metadata render Python-style signatures with per-argument docs; tools sharing a `group` render under a `##` section heading (useful past ~10 tools); `{ includeLanguageNotes: true }` appends a short description of the supported Python subset so hosts don't each hand-write it.
+
+```typescript
+generateToolsPrompt([
+  {
+    name: "get_sales",
+    description: "Fetch sales rows for a region.",
+    handler: getSales,
+    group: "Data",
+    parameters: [
+      { name: "region", type: "str", description: "Sales region code" },
+      { name: "currency", type: "str", default: '"USD"' },
+    ],
+  },
+], { includeLanguageNotes: true });
+// ## Data
+// - get_sales(region: str, currency: str = "USD") - Fetch sales rows for a region.
+//     region: Sales region code
+// ...
+```
 
 ---
 

@@ -107,3 +107,37 @@ export class MaxIterationsError extends InterpreterError {
   }
 }
 
+/** Wall-clock deadline exceeded (timeoutMs option). Like MaxIterationsError,
+ *  this is a host resource bound — deliberately not catchable from Python. */
+export class TimeoutError extends InterpreterError {
+  constructor(timeoutMs: number, line: number, column: number) {
+    super(`Execution exceeded the ${timeoutMs}ms time limit`, line, column);
+    this.name = 'TimeoutError';
+  }
+}
+
+/** Result of an operation would exceed the configured memory limits.
+ *  Catchable from Python as MemoryError / Exception, like CPython. */
+export class MemoryError extends InterpreterError {
+  constructor(message: string, line: number, column: number) {
+    super(message, line, column);
+    this.name = 'MemoryError';
+  }
+}
+
+export class RuntimeError extends InterpreterError {
+  constructor(message: string, line: number, column: number) {
+    super(message, line, column);
+    this.name = 'RuntimeError';
+  }
+}
+
+/** A JS tool handler threw. Catchable from Python as ToolError, RuntimeError,
+ *  or Exception, so scripts can implement fallbacks. */
+export class ToolError extends RuntimeError {
+  constructor(message: string, line: number, column: number) {
+    super(message, line, column);
+    this.name = 'ToolError';
+  }
+}
+

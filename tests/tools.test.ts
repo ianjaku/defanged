@@ -569,3 +569,171 @@ d = get_date()
     expect(result).toBe('2024-01-15T10:30:00');
   });
 });
+
+describe('Tool handler errors (ToolError)', () => {
+  const throwing = (): ToolDefinition[] => [{
+    name: 'boom',
+    handler: () => { throw new Error('db exploded'); },
+  }];
+
+  test('a JS handler throw surfaces as a catchable ToolError', async () => {
+    const interpreter = createInterpreter({ tools: throwing() });
+    const result = await interpreter.run(`
+try:
+    boom()
+    result = "no error"
+except ToolError as e:
+    result = "caught: " + e
+result
+`);
+    expect(result).toBe("caught: Tool 'boom' failed: db exploded");
+  });
+
+  test('ToolError is catchable as RuntimeError', async () => {
+    const interpreter = createInterpreter({ tools: throwing() });
+    expect(await interpreter.run(`
+try:
+    boom()
+except RuntimeError:
+    result = "caught"
+result
+`)).toBe('caught');
+  });
+
+  test('ToolError is catchable as Exception', async () => {
+    const interpreter = createInterpreter({ tools: throwing() });
+    expect(await interpreter.run(`
+try:
+    boom()
+except Exception:
+    result = "caught"
+result
+`)).toBe('caught');
+  });
+
+  test('an uncaught ToolError rejects the run with the call-site position', async () => {
+    const interpreter = createInterpreter({ tools: throwing() });
+    await expect(interpreter.run('x = 1\nboom()')).rejects.toThrow("Line 2, Column 1: Tool 'boom' failed: db exploded");
+  });
+
+  test('async handler rejections are also ToolErrors', async () => {
+    const interpreter = createInterpreter({
+      tools: [{ name: 'boom', handler: async () => { throw new Error('late failure'); } }],
+    });
+    expect(await interpreter.run(`
+try:
+    boom()
+except ToolError as e:
+    result = e
+result
+`)).toBe("Tool 'boom' failed: late failure");
+  });
+
+  test('non-Error throws are stringified', async () => {
+    const interpreter = createInterpreter({
+      tools: [{ name: 'boom', handler: () => { throw 'plain string'; } }],
+    });
+    expect(await interpreter.run(`
+try:
+    boom()
+except ToolError as e:
+    result = e
+result
+`)).toBe("Tool 'boom' failed: plain string");
+  });
+});
+
+describe('timeoutMs option', () => {
+  test('a tight loop is stopped by the wall-clock deadline', async () => {
+    const interpreter = createInterpreter({ timeoutMs: 100, maxIterations: 1e12 });
+    const start = Date.now();
+    await expect(interpreter.run('while True:\n    x = 1')).rejects.toThrow('Execution exceeded the 100ms time limit');
+    expect(Date.now() - start).toBeLessThan(5000);
+  });
+
+  test('time spent inside a tool handler counts against the deadline', async () => {
+    const interpreter = createInterpreter({
+      timeoutMs: 50,
+      tools: [{ name: 'slow', handler: () => new Promise(r => setTimeout(r, 120)) }],
+    });
+    await expect(interpreter.run('slow()\nx = 1')).rejects.toThrow('time limit');
+  });
+
+  test('TimeoutError is not catchable from Python', async () => {
+    const interpreter = createInterpreter({ timeoutMs: 100, maxIterations: 1e12 });
+    await expect(interpreter.run(`
+while True:
+    try:
+        x = 1
+    except:
+        pass
+`)).rejects.toThrow('time limit');
+  });
+
+  test('fast scripts are unaffected', async () => {
+    const interpreter = createInterpreter({ timeoutMs: 5000 });
+    expect(await interpreter.run('sum([1, 2, 3])')).toBe(6);
+  });
+});
+
+describe('Handler calling convention', () => {
+  test('zero-arg call passes a single empty kwargs dict', async () => {
+    let received: any[] = [];
+    const interpreter = createInterpreter({
+      tools: [{ name: 'f', handler: (...args: any[]) => { received = args; return null; } }],
+    });
+    await interpreter.run('f()');
+    expect(received).toEqual([{}]);
+  });
+
+  test('positional args come first, kwargs dict last', async () => {
+    let received: any[] = [];
+    const interpreter = createInterpreter({
+      tools: [{ name: 'f', handler: (...args: any[]) => { received = args; return null; } }],
+    });
+    await interpreter.run('f("a", 2, x=1, y="z")');
+    expect(received).toEqual(['a', 2, { x: 1, y: 'z' }]);
+  });
+});
+
+describe('generateToolsPrompt', () => {
+  test('renders parameter signatures', () => {
+    const prompt = generateToolsPrompt([{
+      name: 'get_sales',
+      description: 'Fetch sales rows',
+      handler: () => [],
+      parameters: [
+        { name: 'region', type: 'str', description: 'Sales region code' },
+        { name: 'month', type: 'int' },
+        { name: 'currency', type: 'str', default: '"USD"' },
+      ],
+    }]);
+    expect(prompt).toContain('get_sales(region: str, month: int, currency: str = "USD") - Fetch sales rows');
+    expect(prompt).toContain('region: Sales region code');
+  });
+
+  test('tools without parameters render as name()', () => {
+    const prompt = generateToolsPrompt([{ name: 'ping', description: 'Ping', handler: () => 1 }]);
+    expect(prompt).toContain('- ping() - Ping');
+  });
+
+  test('groups render as sections in first-seen order', () => {
+    const prompt = generateToolsPrompt([
+      { name: 'a', description: 'A', handler: () => 1, group: 'Data' },
+      { name: 'b', description: 'B', handler: () => 1, group: 'Output' },
+      { name: 'c', description: 'C', handler: () => 1, group: 'Data' },
+    ]);
+    expect(prompt).toContain('## Data');
+    expect(prompt).toContain('## Output');
+    expect(prompt.indexOf('## Data')).toBeLessThan(prompt.indexOf('## Output'));
+    expect(prompt.indexOf('- c() - C')).toBeLessThan(prompt.indexOf('## Output'));
+  });
+
+  test('language notes are opt-in', () => {
+    const without = generateToolsPrompt([{ name: 'f', handler: () => 1 }]);
+    const withNotes = generateToolsPrompt([{ name: 'f', handler: () => 1 }], { includeLanguageNotes: true });
+    expect(without).not.toContain('Language notes:');
+    expect(withNotes).toContain('Language notes:');
+    expect(withNotes).toContain('datetime, math, statistics, re');
+  });
+});
