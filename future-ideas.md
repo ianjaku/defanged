@@ -1,2 +1,0 @@
-- Create Go app that can be easily ran through a CLI
-- Create Go app that can be ran as a sub process
