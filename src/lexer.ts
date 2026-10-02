@@ -3,8 +3,9 @@
  * Converts source code into a stream of tokens
  */
 
-import { Token, TokenType, KEYWORDS } from './tokens';
+import { Token, TokenType, KEYWORDS, FStringTokenPart } from './tokens';
 import { SyntaxError } from './errors';
+import { parseIntString } from './numbers';
 
 export class Lexer {
   private source: string;
@@ -55,8 +56,9 @@ export class Lexer {
     if (this.isAtEnd()) return;
 
     // Backslash line continuation
-    if (this.peek() === '\\' && this.peekNext() === '\n') {
+    if (this.peek() === '\\' && (this.peekNext() === '\n' || (this.peekNext() === '\r' && this.peekAhead(2) === '\n'))) {
       this.advance(); // consume backslash
+      if (this.peek() === '\r') this.advance();
       this.advance(); // consume newline
       this.line++;
       this.column = 1;
@@ -83,10 +85,25 @@ export class Lexer {
       return;
     }
 
-    // Numbers
-    if (this.isDigit(char)) {
+    // Numbers (including a leading-dot float like .5)
+    if (this.isDigit(char) || (char === '.' && this.isDigit(this.peekNext()))) {
       this.number();
       return;
+    }
+
+    // u"..." is a plain string; b"..." has no equivalent here.
+    if ((char === 'u' || char === 'U') && (this.peekNext() === '"' || this.peekNext() === "'")) {
+      this.advance();
+      this.string(this.peek());
+      return;
+    }
+    if (char === 'b' || char === 'B' || ((char === 'r' || char === 'R') && (this.peekNext() === 'b' || this.peekNext() === 'B'))) {
+      const afterPrefix = char === 'b' || char === 'B'
+        ? (this.peekNext() === 'r' || this.peekNext() === 'R' ? this.peekAhead(2) : this.peekNext())
+        : this.peekAhead(2);
+      if (afterPrefix === '"' || afterPrefix === "'") {
+        throw new SyntaxError('bytes literals are not supported in this sandbox — use a regular str', this.line, this.column);
+      }
     }
 
     // String prefixes: f"...", r"...", rf"..."/fr"..." (case-insensitive)
@@ -134,7 +151,7 @@ export class Lexer {
         throw new SyntaxError(`Unexpected character ';'`, this.line, this.column);
       }
       if (this.tokens.length === 0 || this.tokens[this.tokens.length - 1].type !== TokenType.NEWLINE) {
-        this.tokens.push(this.makeToken(TokenType.NEWLINE, null));
+        this.tokens.push(this.makeToken(TokenType.NEWLINE, ';'));
       }
       this.advance();
       return;
@@ -181,8 +198,12 @@ export class Lexer {
     // Don't emit NEWLINE inside parentheses (implicit line continuation)
     if (this.parenDepth === 0) {
       // Don't emit multiple NEWLINEs in a row
-      if (this.tokens.length === 0 || this.tokens[this.tokens.length - 1].type !== TokenType.NEWLINE) {
+      const last = this.tokens[this.tokens.length - 1];
+      if (!last || last.type !== TokenType.NEWLINE) {
         this.tokens.push(this.makeToken(TokenType.NEWLINE, null));
+      } else {
+        // A `;` right before the line break ends the line, not just a statement.
+        last.value = null;
       }
     }
     this.advance();
@@ -201,73 +222,91 @@ export class Lexer {
 
   private number(): void {
     const startColumn = this.column;
-    let numStr = '';
+    const start = this.pos;
+    const push = (value: number | bigint, isFloat: boolean) => {
+      this.tokens.push({ type: TokenType.NUMBER, value, isFloat, line: this.line, column: startColumn });
+    };
 
-    // Check for 0x, 0o, 0b prefixes
-    if (this.peek() === '0' && (this.peekNext() === 'x' || this.peekNext() === 'X' ||
-                                 this.peekNext() === 'o' || this.peekNext() === 'O' ||
-                                 this.peekNext() === 'b' || this.peekNext() === 'B')) {
-      const prefix = this.peekNext().toLowerCase();
-      this.advance(); // consume '0'
-      this.advance(); // consume prefix char
-      let digits = '';
-      if (prefix === 'x') {
-        while (this.isHexDigit(this.peek()) || this.peek() === '_') {
-          if (this.peek() !== '_') digits += this.peek();
-          this.advance();
-        }
-        this.tokens.push({ type: TokenType.NUMBER, value: parseInt(digits, 16), line: this.line, column: startColumn });
-      } else if (prefix === 'o') {
-        while (this.isOctDigit(this.peek()) || this.peek() === '_') {
-          if (this.peek() !== '_') digits += this.peek();
-          this.advance();
-        }
-        this.tokens.push({ type: TokenType.NUMBER, value: parseInt(digits, 8), line: this.line, column: startColumn });
-      } else {
-        while (this.peek() === '0' || this.peek() === '1' || this.peek() === '_') {
-          if (this.peek() !== '_') digits += this.peek();
-          this.advance();
-        }
-        this.tokens.push({ type: TokenType.NUMBER, value: parseInt(digits, 2), line: this.line, column: startColumn });
-      }
+    // 0x / 0o / 0b prefixed ints
+    if (this.peek() === '0' && 'xXoObB'.includes(this.peekNext())) {
+      this.advance();
+      this.advance();
+      while (this.isHexDigit(this.peek()) || this.peek() === '_') this.advance();
+      const text = this.source.slice(start, this.pos);
+      const value = parseIntString(text, 0);
+      if (value === undefined) throw new SyntaxError(`invalid number literal '${text}'`, this.line, startColumn);
+      push(value, false);
       return;
     }
 
-    while (this.isDigit(this.peek()) || this.peek() === '_') {
-      if (this.peek() !== '_') numStr += this.peek();
+    let isFloat = false;
+    while (this.isDigit(this.peek()) || this.peek() === '_') this.advance();
+
+    // Fraction: `1.5`, `.5`, and a bare trailing dot (`1.`), but not `1.real`.
+    if (this.peek() === '.' && !this.isAlpha(this.peekNext()) && this.peekNext() !== '.') {
+      isFloat = true;
       this.advance();
+      while (this.isDigit(this.peek()) || this.peek() === '_') this.advance();
     }
 
-    // Check for float
-    if (this.peek() === '.' && this.isDigit(this.peekNext())) {
-      numStr += this.advance(); // consume '.'
-      while (this.isDigit(this.peek()) || this.peek() === '_') {
-        if (this.peek() !== '_') numStr += this.peek();
-        this.advance();
-      }
-    }
-
-    // Scientific notation
+    // Exponent, only when digits actually follow (`1e5`, `1e-5`)
     if (this.peek() === 'e' || this.peek() === 'E') {
-      numStr += this.advance();
-      if (this.peek() === '+' || this.peek() === '-') {
-        numStr += this.advance();
-      }
-      while (this.isDigit(this.peek())) {
-        numStr += this.advance();
+      const sign = this.peekNext() === '+' || this.peekNext() === '-';
+      if (this.isDigit(sign ? this.peekAhead(2) : this.peekNext())) {
+        isFloat = true;
+        this.advance();
+        if (sign) this.advance();
+        while (this.isDigit(this.peek()) || this.peek() === '_') this.advance();
       }
     }
 
-    const value = numStr.includes('.') || numStr.includes('e') || numStr.includes('E')
-      ? parseFloat(numStr)
-      : parseInt(numStr, 10);
+    const text = this.source.slice(start, this.pos);
+    if (isFloat) {
+      push(Number(text.replace(/_/g, '')), true);
+    } else {
+      const value = parseIntString(text, 10);
+      if (value === undefined) throw new SyntaxError(`invalid number literal '${text}'`, this.line, startColumn);
+      push(value, false);
+    }
+  }
 
-    this.tokens.push({
-      type: TokenType.NUMBER,
-      value,
-      line: this.line,
-      column: startColumn,
-    });
+  /** Decodes the escape after a backslash that has just been consumed.
+   *  Unknown escapes keep their backslash, like CPython ("\\d" stays `\\d`). */
+  private readEscape(): string {
+    const c = this.advance();
+    switch (c) {
+      case '\n': this.line++; this.column = 1; return '';
+      case 'n': return '\n';
+      case 't': return '\t';
+      case 'r': return '\r';
+      case '\\': return '\\';
+      case "'": return "'";
+      case '"': return '"';
+      case 'a': return '\x07';
+      case 'b': return '\b';
+      case 'f': return '\f';
+      case 'v': return '\v';
+      case 'x': case 'u': case 'U': {
+        const len = c === 'x' ? 2 : c === 'u' ? 4 : 8;
+        const hex = this.source.slice(this.pos, this.pos + len);
+        if (hex.length !== len || !/^[0-9a-fA-F]+$/.test(hex)) {
+          throw new SyntaxError(`truncated \\${c} escape`, this.line, this.column);
+        }
+        for (let i = 0; i < len; i++) this.advance();
+        const code = parseInt(hex, 16);
+        if (code > 0x10ffff) throw new SyntaxError('illegal Unicode character', this.line, this.column);
+        return String.fromCodePoint(code);
+      }
+      case 'N':
+        throw new SyntaxError('\\N{...} named escapes are not supported in this sandbox — use \\uXXXX', this.line, this.column);
+      default:
+        if (c >= '0' && c <= '7') {
+          let oct = c;
+          while (oct.length < 3 && this.peek() >= '0' && this.peek() <= '7') oct += this.advance();
+          return String.fromCharCode(parseInt(oct, 8));
+        }
+        return '\\' + c;
+    }
   }
 
   private string(quote: string, raw = false): void {
@@ -310,19 +349,11 @@ export class Lexer {
       // (a backslash can't be the last character, like CPython).
       if (this.peek() === '\\') {
         this.advance(); // consume backslash
-        const escaped = this.advance();
         if (raw) {
-          value += '\\' + escaped;
+          if (this.peek() === '\n') { this.line++; this.column = 0; }
+          value += '\\' + this.advance();
         } else {
-          switch (escaped) {
-            case 'n': value += '\n'; break;
-            case 't': value += '\t'; break;
-            case 'r': value += '\r'; break;
-            case '\\': value += '\\'; break;
-            case "'": value += "'"; break;
-            case '"': value += '"'; break;
-            default: value += escaped; break;
-          }
+          value += this.readEscape();
         }
       } else {
         if (this.peek() === '\n') {
@@ -365,7 +396,7 @@ export class Lexer {
       this.advance(); // consume third quote
     }
     
-    const parts: { text: string; expr: string | null; formatSpec?: string }[] = [];
+    const parts: FStringTokenPart[] = [];
     let currentText = '';
     let terminated = false;
     
@@ -453,50 +484,19 @@ export class Lexer {
           throw new SyntaxError('Unterminated expression in f-string', startLine, startColumn);
         }
         
-        // Split format spec from expression (e.g. "x:.2f" → expr="x", fmt=".2f")
-        let exprStr = expr.trim();
-        let formatSpec: string | undefined;
-        let colonIdx = -1;
-        let depth = 0;
-        let inStr: string | null = null;
-        for (let ci = 0; ci < exprStr.length; ci++) {
-          const cc = exprStr[ci];
-          if (inStr) {
-            if (cc === '\\') { ci++; continue; }
-            if (cc === inStr) inStr = null;
-            continue;
-          }
-          if (cc === '"' || cc === "'") { inStr = cc; continue; }
-          if (cc === '(' || cc === '[' || cc === '{') { depth++; continue; }
-          if (cc === ')' || cc === ']' || cc === '}') { depth--; continue; }
-          if (cc === ':' && depth === 0) { colonIdx = ci; break; }
-        }
-        if (colonIdx >= 0) {
-          formatSpec = exprStr.slice(colonIdx + 1);
-          exprStr = exprStr.slice(0, colonIdx).trim();
-        }
-
-        // Add expression part
-        parts.push({ text: '', expr: exprStr, formatSpec });
+        const split = splitFStringField(expr);
+        if (split.debugText !== undefined) parts.push({ text: split.debugText, expr: null });
+        parts.push({ text: '', expr: split.expr, formatSpec: split.formatSpec, conversion: split.conversion });
         continue;
       }
       
       // Handle escape sequences (kept literal in raw f-strings)
       if (this.peek() === '\\') {
         this.advance();
-        const escaped = this.advance();
         if (raw) {
-          currentText += '\\' + escaped;
+          currentText += '\\' + this.advance();
         } else {
-          switch (escaped) {
-            case 'n': currentText += '\n'; break;
-            case 't': currentText += '\t'; break;
-            case 'r': currentText += '\r'; break;
-            case '\\': currentText += '\\'; break;
-            case "'": currentText += "'"; break;
-            case '"': currentText += '"'; break;
-            default: currentText += escaped; break;
-          }
+          currentText += this.readEscape();
         }
       } else {
         if (this.peek() === '\n') {
@@ -533,7 +533,7 @@ export class Lexer {
       name += this.advance();
     }
 
-    const type = KEYWORDS[name] ?? TokenType.IDENTIFIER;
+    const type = Object.hasOwn(KEYWORDS, name) ? KEYWORDS[name] : TokenType.IDENTIFIER;
     this.tokens.push({
       type,
       value: type === TokenType.IDENTIFIER ? name : null,
@@ -549,15 +549,15 @@ export class Lexer {
     // Two-character operators
     const next = this.peek();
     let type: TokenType;
-    let consumed = false;
 
     switch (char) {
       case '+':
-        if (next === '=') { this.advance(); type = TokenType.PLUS_ASSIGN; consumed = true; }
+        if (next === '=') { this.advance(); type = TokenType.PLUS_ASSIGN; }
         else { type = TokenType.PLUS; }
         break;
       case '-':
-        if (next === '=') { this.advance(); type = TokenType.MINUS_ASSIGN; consumed = true; }
+        if (next === '=') { this.advance(); type = TokenType.MINUS_ASSIGN; }
+        else if (next === '>') { this.advance(); type = TokenType.ARROW; }
         else { type = TokenType.MINUS; }
         break;
       case '*':
@@ -565,9 +565,9 @@ export class Lexer {
           this.advance();
           if (this.peek() === '=') { this.advance(); type = TokenType.DOUBLE_STAR_ASSIGN; }
           else { type = TokenType.DOUBLE_STAR; }
-          consumed = true;
+         
         }
-        else if (next === '=') { this.advance(); type = TokenType.STAR_ASSIGN; consumed = true; }
+        else if (next === '=') { this.advance(); type = TokenType.STAR_ASSIGN; }
         else { type = TokenType.STAR; }
         break;
       case '/':
@@ -575,41 +575,54 @@ export class Lexer {
           this.advance();
           if (this.peek() === '=') { this.advance(); type = TokenType.DOUBLE_SLASH_ASSIGN; }
           else { type = TokenType.DOUBLE_SLASH; }
-          consumed = true;
+         
         }
-        else if (next === '=') { this.advance(); type = TokenType.SLASH_ASSIGN; consumed = true; }
+        else if (next === '=') { this.advance(); type = TokenType.SLASH_ASSIGN; }
         else { type = TokenType.SLASH; }
         break;
       case '%':
-        if (next === '=') { this.advance(); type = TokenType.PERCENT_ASSIGN; consumed = true; }
+        if (next === '=') { this.advance(); type = TokenType.PERCENT_ASSIGN; }
         else { type = TokenType.PERCENT; }
         break;
       case '=':
-        if (next === '=') { this.advance(); type = TokenType.EQ; consumed = true; }
+        if (next === '=') { this.advance(); type = TokenType.EQ; }
         else { type = TokenType.ASSIGN; }
         break;
       case '!':
-        if (next === '=') { this.advance(); type = TokenType.NE; consumed = true; }
+        if (next === '=') { this.advance(); type = TokenType.NE; }
         else { throw new SyntaxError(`Unexpected character '${char}'`, this.line, startColumn); }
         break;
       case '<':
-        if (next === '<') { this.advance(); type = TokenType.LSHIFT; consumed = true; }
-        else if (next === '=') { this.advance(); type = TokenType.LE; consumed = true; }
+        if (next === '<') {
+          this.advance();
+          if (this.peek() === '=') { this.advance(); type = TokenType.LSHIFT_ASSIGN; }
+          else { type = TokenType.LSHIFT; }
+         
+        }
+        else if (next === '=') { this.advance(); type = TokenType.LE; }
         else { type = TokenType.LT; }
         break;
       case '>':
-        if (next === '>') { this.advance(); type = TokenType.RSHIFT; consumed = true; }
-        else if (next === '=') { this.advance(); type = TokenType.GE; consumed = true; }
+        if (next === '>') {
+          this.advance();
+          if (this.peek() === '=') { this.advance(); type = TokenType.RSHIFT_ASSIGN; }
+          else { type = TokenType.RSHIFT; }
+         
+        }
+        else if (next === '=') { this.advance(); type = TokenType.GE; }
         else { type = TokenType.GT; }
         break;
       case '&':
-        type = TokenType.AMPERSAND;
+        if (next === '=') { this.advance(); type = TokenType.AMPERSAND_ASSIGN; }
+        else { type = TokenType.AMPERSAND; }
         break;
       case '|':
-        type = TokenType.PIPE;
+        if (next === '=') { this.advance(); type = TokenType.PIPE_ASSIGN; }
+        else { type = TokenType.PIPE; }
         break;
       case '^':
-        type = TokenType.CARET;
+        if (next === '=') { this.advance(); type = TokenType.CARET_ASSIGN; }
+        else { type = TokenType.CARET; }
         break;
       case '~':
         type = TokenType.TILDE;
@@ -653,7 +666,13 @@ export class Lexer {
         }
         break;
       case '.':
-        type = TokenType.DOT;
+        if (next === '.' && this.peekNext() === '.') {
+          this.advance();
+          this.advance();
+          type = TokenType.ELLIPSIS;
+        } else {
+          type = TokenType.DOT;
+        }
         break;
       default:
         throw new SyntaxError(`Unexpected character '${char}'`, this.line, startColumn);
@@ -667,7 +686,7 @@ export class Lexer {
     });
   }
 
-  private makeToken(type: TokenType, value: string | number | null): Token {
+  private makeToken(type: TokenType, value: string | null): Token {
     return {
       type,
       value,
@@ -709,7 +728,8 @@ export class Lexer {
   private isAlpha(char: string): boolean {
     return (char >= 'a' && char <= 'z') ||
            (char >= 'A' && char <= 'Z') ||
-           char === '_';
+           char === '_' ||
+           char > '\x7f';
   }
 
   private isHexDigit(char: string): boolean {
@@ -718,13 +738,54 @@ export class Lexer {
            (char >= 'A' && char <= 'F');
   }
 
-  private isOctDigit(char: string): boolean {
-    return char >= '0' && char <= '7';
-  }
-
   private isAlphaNumeric(char: string): boolean {
     return this.isAlpha(char) || this.isDigit(char);
   }
+}
+
+/**
+ * Splits the text inside an f-string `{...}` into its expression, optional
+ * `!r`-style conversion and optional format spec. `{x=}` also yields the
+ * literal `x=` text to print before the value, and defaults to repr.
+ */
+function splitFStringField(raw: string): { expr: string; formatSpec?: string; conversion?: string; debugText?: string } {
+  let depth = 0;
+  let inStr: string | null = null;
+  let exprEnd = raw.length;
+  let conversion: string | undefined;
+  let formatSpec: string | undefined;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (inStr) {
+      if (c === '\\') i++;
+      else if (c === inStr) inStr = null;
+      continue;
+    }
+    if (c === '"' || c === "'") { inStr = c; continue; }
+    if (c === '(' || c === '[' || c === '{') { depth++; continue; }
+    if (c === ')' || c === ']' || c === '}') { depth--; continue; }
+    if (depth !== 0) continue;
+    if (c === '!' && raw[i + 1] !== '=') {
+      exprEnd = i;
+      const colon = raw.indexOf(':', i);
+      conversion = raw.slice(i + 1, colon >= 0 ? colon : undefined).trim();
+      if (colon >= 0) formatSpec = raw.slice(colon + 1);
+      break;
+    }
+    if (c === ':') {
+      exprEnd = i;
+      formatSpec = raw.slice(i + 1);
+      break;
+    }
+  }
+  let exprText = raw.slice(0, exprEnd);
+  let debugText: string | undefined;
+  if (/=\s*$/.test(exprText) && !/[=!<>]=\s*$/.test(exprText)) {
+    debugText = exprText;
+    exprText = exprText.replace(/=\s*$/, '');
+    if (conversion === undefined && formatSpec === undefined) conversion = 'r';
+  }
+  return { expr: exprText.trim(), formatSpec, conversion, debugText };
 }
 
 export function tokenize(source: string): Token[] {

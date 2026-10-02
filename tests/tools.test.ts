@@ -297,7 +297,7 @@ summary
     test('undefined tool throws NameError', async () => {
       const interpreter = createInterpreter({ tools: [] });
       await expect(interpreter.run('unknown_function()')).rejects.toThrow(
-        "Name 'unknown_function' is not defined"
+        "name 'unknown_function' is not defined"
       );
     });
 
@@ -570,6 +570,14 @@ d = get_date()
   });
 });
 
+describe('generateToolsPrompt language notes', () => {
+  test('tell the model how to join two lists', () => {
+    const notes = generateToolsPrompt([], { includeLanguageNotes: true });
+    expect(notes).toContain('To join two lists, build a dict keyed on the join field');
+    expect(generateToolsPrompt([])).not.toContain('To join two lists');
+  });
+});
+
 describe('Tool handler errors (ToolError)', () => {
   const throwing = (): ToolDefinition[] => [{
     name: 'boom',
@@ -583,7 +591,7 @@ try:
     boom()
     result = "no error"
 except ToolError as e:
-    result = "caught: " + e
+    result = "caught: " + str(e)
 result
 `);
     expect(result).toBe("caught: Tool 'boom' failed: db exploded");

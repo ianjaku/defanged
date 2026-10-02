@@ -17,14 +17,19 @@ export * from './values';
 export * from './errors';
 
 // Convenience function for quick execution
-import { createInterpreter, type ToolDefinition } from './interpreter';
+import { createInterpreter, type InterpreterOptions, type ToolDefinition } from './interpreter';
 
+/**
+ * One-shot execution. The third argument is either a print callback or the
+ * remaining interpreter options (`timeoutMs`, `limits`, `onPrint`, ...).
+ */
 export async function runPython(
   code: string,
   tools?: ToolDefinition[],
-  onPrint?: (output: string) => void
+  options?: ((output: string) => void) | Omit<InterpreterOptions, 'tools'>
 ): Promise<any> {
-  const interpreter = createInterpreter({ tools, onPrint });
+  const rest = typeof options === 'function' ? { onPrint: options } : options;
+  const interpreter = createInterpreter({ ...rest, tools });
   return await interpreter.run(code);
 }
 
@@ -51,8 +56,9 @@ function renderTool(tool: ToolDefinition): string {
 const LANGUAGE_NOTES = `Language notes:
 - The interpreter runs a Python subset with no file, network, or process access.
 - Only these modules can be imported: datetime, math, statistics, re.
-- class definitions, with-statements, and async/await are not supported — use plain functions and dicts.
-- Tool calls look synchronous: call them like normal functions (no await). Keyword arguments are supported.`;
+- class definitions, with-statements, match statements and async/await are not supported — use plain functions, dicts and if/elif.
+- Tool calls look synchronous: call them like normal functions (no await). Keyword arguments are supported.
+- To join two lists, build a dict keyed on the join field and look rows up in it; do not compare every pair in a nested loop.`;
 
 /**
  * Generate a system prompt based on available tools. Tools that share a

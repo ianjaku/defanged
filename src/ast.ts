@@ -12,7 +12,14 @@ export interface ASTNode {
 
 export interface NumberLiteral extends ASTNode {
   type: 'Number';
-  value: number;
+  /** bigint for int literals beyond the safe-integer range. */
+  value: number | bigint;
+  /** True for float literals (`1.0`, `1e3`); `1` and `1.0` are different values. */
+  isFloat: boolean;
+}
+
+export interface EllipsisLiteral extends ASTNode {
+  type: 'Ellipsis';
 }
 
 export interface StringLiteral extends ASTNode {
@@ -64,9 +71,9 @@ export interface Compare extends ASTNode {
 export interface Call extends ASTNode {
   type: 'Call';
   func: Expression;
+  /** Positional arguments in source order; `*xs` appears as a Starred node. */
   args: Expression[];
   kwargs: { name: string; value: Expression }[];
-  starArgs?: Expression[];
   doubleStarArgs?: Expression[];
 }
 
@@ -97,7 +104,8 @@ export interface List extends ASTNode {
 
 export interface Dict extends ASTNode {
   type: 'Dict';
-  keys: Expression[];
+  /** A null key marks a `**mapping` entry whose value is the mapping. */
+  keys: (Expression | null)[];
   values: Expression[];
 }
 
@@ -149,16 +157,19 @@ export interface Ternary extends ASTNode {
   alternate: Expression;
 }
 
-export interface Lambda extends ASTNode {
+export interface Lambda extends ASTNode, Signature {
   type: 'Lambda';
-  params: string[];
   body: Expression;
 }
 
 export interface FStringPart {
   text: string;
   expr: Expression | null;
+  /** `!r` / `!s` / `!a`. */
+  conversion?: 'r' | 's' | 'a';
   formatSpec?: string;
+  /** Set instead of formatSpec when the spec itself interpolates (`{x:{width}}`). */
+  specParts?: FStringPart[];
 }
 
 export interface FString extends ASTNode {
@@ -192,6 +203,7 @@ export type Expression =
   | StringLiteral
   | BooleanLiteral
   | NoneLiteral
+  | EllipsisLiteral
   | Identifier
   | BinaryOp
   | UnaryOp
@@ -233,7 +245,7 @@ export interface Assignment extends ASTNode {
 export interface AugmentedAssignment extends ASTNode {
   type: 'AugmentedAssignment';
   target: Expression;
-  op: '+=' | '-=' | '*=' | '/=' | '//=' | '%=' | '**=';
+  op: '+=' | '-=' | '*=' | '/=' | '//=' | '%=' | '**=' | '&=' | '|=' | '^=' | '<<=' | '>>=';
   value: Expression;
 }
 
@@ -259,12 +271,18 @@ export interface While extends ASTNode {
   orelse: Statement[];
 }
 
-export interface FunctionDef extends ASTNode {
-  type: 'FunctionDef';
-  name: string;
+/** Parameter list shared by `def` and `lambda`. */
+export interface Signature {
   params: Parameter[];
   restParam?: string;
+  /** Parameters after `*` or `*args`: passable by keyword only. */
+  kwOnlyParams: Parameter[];
   kwargsParam?: string;
+}
+
+export interface FunctionDef extends ASTNode, Signature {
+  type: 'FunctionDef';
+  name: string;
   decorators: Expression[];
   body: Statement[];
 }
@@ -277,6 +295,8 @@ export interface Parameter {
 export interface Raise extends ASTNode {
   type: 'Raise';
   value: Expression | null;
+  /** `raise X from cause`; evaluated but otherwise ignored. */
+  cause?: Expression | null;
 }
 
 export interface Global extends ASTNode {
@@ -319,7 +339,7 @@ export interface Pass extends ASTNode {
 
 export interface ExceptHandler extends ASTNode {
   type: 'ExceptHandler';
-  exceptionTypes: string[] | null;  // Exception type names (e.g., ['ValueError', 'TypeError']) or null for bare except
+  exceptionTypes: string[] | null;  // Exception type names (e.g., ['ValueError', 're.error']) or null for bare except
   name: string | null;           // Variable name to bind exception to (e.g., 'e' in 'except ValueError as e')
   body: Statement[];
 }

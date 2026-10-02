@@ -909,11 +909,11 @@ evens
 
   describe('Error Handling', () => {
     test('undefined variable', async () => {
-      await expect(runPython('undefined_var')).rejects.toThrow("Name 'undefined_var' is not defined");
+      await expect(runPython('undefined_var')).rejects.toThrow("name 'undefined_var' is not defined");
     });
 
     test('division by zero', async () => {
-      await expect(runPython('1 / 0')).rejects.toThrow('Division by zero');
+      await expect(runPython('1 / 0')).rejects.toThrow('division by zero');
     });
 
     test('index out of range', async () => {
@@ -925,7 +925,8 @@ evens
     });
 
     test('type error', async () => {
-      await expect(runPython('"hello" + 5')).rejects.toThrow('unsupported operand type');
+      await expect(runPython('"hello" + 5')).rejects.toThrow('can only concatenate str (not "int") to str');
+      await expect(runPython('5 + "hello"')).rejects.toThrow("unsupported operand type(s) for +: 'int' and 'str'");
     });
   });
 
@@ -960,7 +961,7 @@ try:
 except ZeroDivisionError as e:
     result = e
 result
-`)).toBe('Division by zero');
+`)).toBe('division by zero');
     });
 
     test('multiple except handlers', async () => {
@@ -1014,7 +1015,7 @@ except KeyError:
 finally:
     result.append("finally")
 result
-`)).rejects.toThrow('Division by zero');
+`)).rejects.toThrow('division by zero');
     });
 
     test('try-finally without except', async () => {

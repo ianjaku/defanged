@@ -1,7 +1,7 @@
 {
   "name": "defanged",
   "version": "0.3.0",
-  "description": "A sandboxed Python interpreter written in TypeScript. Safely run Python code emitted by LLMs and agents — no filesystem, no network, no escape.",
+  "description": "A sandboxed Python interpreter written in TypeScript. Safely run Python code emitted by LLMs and agents \u2014 no filesystem, no network, no escape.",
   "keywords": [
     "python",
     "interpreter",
@@ -48,7 +48,8 @@
     "test:features": "bun test tests/features.test.ts",
     "bench": "bun benchmarks/run.ts",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "bun run build"
+    "prepublishOnly": "bun run build",
+    "conformance:record": "bun tests/conformance/record.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

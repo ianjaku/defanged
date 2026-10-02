@@ -7,31 +7,18 @@
  * RegExp, and `\A` / `\Z` become lookarounds that anchor to the string ends.
  * Known divergences from CPython (documented in the README): `\d`/`\w`/`\s`
  * are ASCII-only like JS, `$` does not match before a trailing newline, and
- * `re.VERBOSE`, scoped inline flags, callable replacements, and conditional
- * groups are not supported (they raise with a targeted message).
+ * `re.VERBOSE`, scoped inline flags and conditional groups are not supported
+ * (they raise with a targeted message).
  *
  * Pure computation, no state: the module object is a process-wide singleton.
  */
 
+import { IndexError, TypeError, ValueError } from './errors';
+import { mapCall } from './methods';
 import {
-  PyValue,
-  PyBuiltin,
-  PyModule,
-  pyNumber,
-  pyString,
-  pyNone,
-  pyList,
-  pyTuple,
-  pyIterator,
-  pyDict,
-  dictSet,
-  isNumber,
-  isString,
-  isNone,
-  pyTypeName,
+  Kwargs, MA, NativeFn, PyBuiltin, PyDict, PyList, PyModule, PyObject, PyTuple, PyValue, Runtime, SeqIterator,
+  dictSet, exceptionType, strRepr, andThen, typeName,
 } from './values';
-import { extractKwargs } from './builtins';
-import { TypeError, ValueError, IndexError } from './errors';
 
 // Python flag values (module constants).
 const FLAG_I = 2;    // IGNORECASE
@@ -41,7 +28,7 @@ const FLAG_X = 64;   // VERBOSE
 const FLAG_A = 256;  // ASCII — a no-op: JS \d/\w/\s are ASCII already
 
 function reError(message: string): never {
-  throw new ValueError(message, 0, 0);
+  throw new ValueError(message);
 }
 
 /** Translate a Python pattern to JS RegExp source, lifting global inline
@@ -114,8 +101,8 @@ function withFlags(regex: RegExp, extra: string): RegExp {
   return new RegExp(regex.source, regex.flags + extra);
 }
 
-function method(name: string, fn: PyBuiltin['fn'], acceptsKwargs = false): PyBuiltin {
-  return acceptsKwargs ? { type: 'builtin', name, fn, acceptsKwargs } : { type: 'builtin', name, fn };
+function method(name: string, fn: NativeFn, kw = false): PyBuiltin {
+  return new PyBuiltin(name, fn, kw);
 }
 
 type ExecMatch = RegExpExecArray & {
@@ -124,110 +111,115 @@ type ExecMatch = RegExpExecArray & {
 
 // ── Match objects ────────────────────────────────────────────────────────────
 
-/** Build a Python-facing match object: a builtin-typed value whose attrs
- *  carry the group/span accessors. Truthy, so `if m:` works; a failed match
- *  is represented by None. */
-function makeMatch(m: ExecMatch): PyValue {
-  const groupCount = m.length - 1;
-  const named = m.groups ?? {};
+/** A successful match; a failed match is None, so `if m:` works. */
+class PyMatch extends PyObject {
+  readonly typeName = 're.Match';
 
-  const resolveGroup = (arg: PyValue): number | string => {
-    if (isNumber(arg)) {
-      if (!Number.isInteger(arg.value) || arg.value < 0 || arg.value > groupCount) throw new IndexError('no such group', 0, 0);
-      return arg.value;
-    }
-    if (isString(arg)) {
-      if (!Object.prototype.hasOwnProperty.call(named, arg.value)) throw new IndexError('no such group', 0, 0);
-      return arg.value;
-    }
-    throw new IndexError('no such group', 0, 0);
-  };
-  const groupText = (g: number | string): string | undefined =>
-    typeof g === 'number' ? m[g] : named[g];
-  const groupSpan = (g: number | string): [number, number] | undefined =>
-    typeof g === 'number' ? m.indices?.[g] : m.indices?.groups?.[g];
+  constructor(private readonly m: ExecMatch) {
+    super();
+  }
 
-  const attrs = new Map<string, PyValue>();
-  attrs.set('group', method('re.Match.group', (...args: PyValue[]) => {
-    if (args.length === 0) return pyString(m[0]);
-    const pick = (arg: PyValue): PyValue => {
-      const text = groupText(resolveGroup(arg));
-      return text === undefined ? pyNone() : pyString(text);
-    };
-    return args.length === 1 ? pick(args[0]) : pyTuple(args.map(pick));
-  }));
-  attrs.set('groups', method('re.Match.groups', (defaultVal?: PyValue) => {
-    const fallback = defaultVal ?? pyNone();
-    const out: PyValue[] = [];
-    for (let g = 1; g <= groupCount; g++) out.push(m[g] === undefined ? fallback : pyString(m[g]));
-    return pyTuple(out);
-  }));
-  attrs.set('groupdict', method('re.Match.groupdict', (defaultVal?: PyValue) => {
-    const fallback = defaultVal ?? pyNone();
-    const dict = pyDict();
-    for (const name of Object.keys(named)) {
-      dictSet(dict, pyString(name), named[name] === undefined ? fallback : pyString(named[name]!));
-    }
-    return dict;
-  }));
-  const spanOf = (arg?: PyValue): [number, number] => {
-    const g = arg === undefined ? 0 : resolveGroup(arg);
-    return groupSpan(g) ?? [-1, -1];
-  };
-  attrs.set('start', method('re.Match.start', (arg?: PyValue) => pyNumber(spanOf(arg)[0])));
-  attrs.set('end', method('re.Match.end', (arg?: PyValue) => pyNumber(spanOf(arg)[1])));
-  attrs.set('span', method('re.Match.span', (arg?: PyValue) => {
-    const [s, e] = spanOf(arg);
-    return pyTuple([pyNumber(s), pyNumber(e)]);
-  }));
+  private get named(): Record<string, string | undefined> {
+    return this.m.groups ?? {};
+  }
 
-  return {
-    type: 'builtin',
-    name: 're.Match',
-    attrs,
-    fn: () => { throw new TypeError("'re.Match' object is not callable", 0, 0); },
-  };
+  private resolveGroup(arg: PyValue): number | string {
+    if (typeof arg === 'number' && arg >= 0 && arg < this.m.length) return arg;
+    if (typeof arg === 'string' && Object.prototype.hasOwnProperty.call(this.named, arg)) return arg;
+    throw new IndexError('no such group');
+  }
+
+  private text(g: number | string): PyValue {
+    const value = typeof g === 'number' ? this.m[g] : this.named[g];
+    return value === undefined ? null : value;
+  }
+
+  private span(arg: PyValue | undefined): [number, number] {
+    const g = arg === undefined ? 0 : this.resolveGroup(arg);
+    const span = typeof g === 'number' ? this.m.indices?.[g] : this.m.indices?.groups?.[g];
+    return span ?? [-1, -1];
+  }
+
+  repr(): string {
+    const [start, end] = this.span(undefined);
+    return `<re.Match object; span=(${start}, ${end}), match=${strRepr(this.m[0])}>`;
+  }
+
+  getAttr(name: string): PyValue | undefined {
+    const m = this.m;
+    switch (name) {
+      case 'group':
+        return method('group', (_rt, args) => {
+          if (args.length === 0) return m[0];
+          const pick = (arg: PyValue) => this.text(this.resolveGroup(arg));
+          return args.length === 1 ? pick(args[0]) : new PyTuple(args.map(pick));
+        });
+      case 'groups':
+        return method('groups', (_rt, args) => {
+          const fallback = args[0] ?? null;
+          const out: PyValue[] = [];
+          for (let g = 1; g < m.length; g++) out.push(m[g] === undefined ? fallback : m[g]);
+          return new PyTuple(out);
+        });
+      case 'groupdict':
+        return method('groupdict', (_rt, args) => {
+          const fallback = args[0] ?? null;
+          const dict = new PyDict();
+          for (const key of Object.keys(this.named)) dictSet(dict, key, this.named[key] ?? fallback);
+          return dict;
+        });
+      case 'start': return method('start', (_rt, args) => this.span(args[0])[0]);
+      case 'end': return method('end', (_rt, args) => this.span(args[0])[1]);
+      case 'span': return method('span', (_rt, args) => new PyTuple(this.span(args[0])));
+      case 'string': return m.input;
+      default: return undefined;
+    }
+  }
+
+  /** `m[0]`, `m["name"]`: same as group(). */
+  getItem(arg: PyValue): PyValue {
+    return this.text(this.resolveGroup(arg));
+  }
+}
+
+function matchOrNone(m: RegExpExecArray | null): PyValue {
+  return m ? new PyMatch(m as ExecMatch) : null;
 }
 
 // ── Core operations (shared by module functions and Pattern methods) ────────
 
 function opSearch(regex: RegExp, subject: string): PyValue {
-  const m = withFlags(regex, '').exec(subject) as ExecMatch | null;
-  return m ? makeMatch(m) : pyNone();
+  return matchOrNone(withFlags(regex, '').exec(subject));
 }
 
 function opMatch(regex: RegExp, subject: string): PyValue {
   const sticky = withFlags(regex, 'y');
   sticky.lastIndex = 0;
-  const m = sticky.exec(subject) as ExecMatch | null;
-  return m ? makeMatch(m) : pyNone();
+  return matchOrNone(sticky.exec(subject));
 }
 
 function opFullmatch(regex: RegExp, subject: string): PyValue {
   // (?:...) preserves group numbering; sticky anchors the start, $ the end.
   const anchored = new RegExp(`(?:${regex.source})$`, regex.flags + 'y');
   anchored.lastIndex = 0;
-  const m = anchored.exec(subject) as ExecMatch | null;
-  return m ? makeMatch(m) : pyNone();
+  return matchOrNone(anchored.exec(subject));
 }
 
 function opFindall(regex: RegExp, subject: string): PyValue {
   const results: PyValue[] = [];
   for (const m of subject.matchAll(withFlags(regex, 'g'))) {
     const groupCount = m.length - 1;
-    if (groupCount === 0) results.push(pyString(m[0]));
-    else if (groupCount === 1) results.push(pyString(m[1] ?? ''));
-    else results.push(pyTuple(m.slice(1).map(v => pyString(v ?? ''))));
+    if (groupCount === 0) results.push(m[0]);
+    else if (groupCount === 1) results.push(m[1] ?? '');
+    else results.push(new PyTuple(m.slice(1).map((v) => v ?? '')));
   }
-  return pyList(results);
+  return new PyList(results);
 }
 
 function opFinditer(regex: RegExp, subject: string): PyValue {
   const matches: PyValue[] = [];
-  for (const m of subject.matchAll(withFlags(regex, 'g'))) {
-    matches.push(makeMatch(m as ExecMatch));
-  }
-  return pyIterator(matches);
+  for (const m of subject.matchAll(withFlags(regex, 'g'))) matches.push(new PyMatch(m as ExecMatch));
+  return new SeqIterator(matches, 'callable_iterator');
 }
 
 /** Expand a Python replacement template (`\1`, `\g<name>`, `\n`, `\\`). */
@@ -237,8 +229,7 @@ function expandTemplate(template: string, m: ExecMatch): string {
     const v = typeof g === 'number' ? m[g] : named[g];
     if (typeof g === 'number' && (g < 0 || g >= m.length)) reError(`invalid group reference ${g} in replacement`);
     if (typeof g === 'string' && !Object.prototype.hasOwnProperty.call(named, g)) reError(`unknown group name '${g}' in replacement`);
-    if (v === undefined) reError('unmatched group');
-    return v;
+    return v ?? '';
   };
   let out = '';
   for (let i = 0; i < template.length; i++) {
@@ -274,24 +265,30 @@ function expandTemplate(template: string, m: ExecMatch): string {
   return out;
 }
 
-function opSub(regex: RegExp, repl: PyValue, subject: string, count: number): { result: string; n: number } {
-  if (!isString(repl)) {
-    throw new TypeError(
-      "re.sub replacement must be a string in this sandbox — callable replacements are not supported; use finditer() and build the string yourself",
-      0, 0
-    );
-  }
-  let out = '';
-  let last = 0;
-  let n = 0;
+/** `repl` is a template string, or a function called with each match. */
+function opSub(rt: Runtime, regex: RegExp, repl: PyValue, subject: string, count: number): MA<{ result: string; n: number }> {
+  const matches: ExecMatch[] = [];
   for (const m of subject.matchAll(withFlags(regex, 'g'))) {
-    if (count > 0 && n >= count) break;
-    out += subject.slice(last, m.index!) + expandTemplate(repl.value, m as ExecMatch);
-    last = m.index! + m[0].length;
-    n++;
+    if (count > 0 && matches.length >= count) break;
+    matches.push(m as ExecMatch);
   }
-  out += subject.slice(last);
-  return { result: out, n };
+  const build = (replacements: string[]) => {
+    let out = '';
+    let last = 0;
+    matches.forEach((m, i) => {
+      out += subject.slice(last, m.index) + replacements[i];
+      last = m.index + m[0].length;
+    });
+    out += subject.slice(last);
+    rt.checkString(out.length);
+    return { result: out, n: matches.length };
+  };
+  if (typeof repl === 'string') return build(matches.map((m) => expandTemplate(repl, m)));
+  return andThen(mapCall(rt, repl, matches.map((m) => new PyMatch(m))), (values) =>
+    build(values.map((v) => {
+      if (typeof v !== 'string') throw new TypeError(`expected str instance, ${typeName(v)} found`);
+      return v;
+    })));
 }
 
 function opSplit(regex: RegExp, subject: string, maxsplit: number): PyValue {
@@ -300,98 +297,108 @@ function opSplit(regex: RegExp, subject: string, maxsplit: number): PyValue {
   let n = 0;
   for (const m of subject.matchAll(withFlags(regex, 'g'))) {
     if (maxsplit > 0 && n >= maxsplit) break;
-    parts.push(pyString(subject.slice(last, m.index!)));
+    parts.push(subject.slice(last, m.index));
     // Like CPython, captured groups participate in the result.
-    for (let g = 1; g < m.length; g++) parts.push(m[g] === undefined ? pyNone() : pyString(m[g]));
-    last = m.index! + m[0].length;
+    for (let g = 1; g < m.length; g++) parts.push(m[g] === undefined ? null : m[g]);
+    last = m.index + m[0].length;
     n++;
   }
-  parts.push(pyString(subject.slice(last)));
-  return pyList(parts);
+  parts.push(subject.slice(last));
+  return new PyList(parts);
 }
 
 // ── Argument plumbing ────────────────────────────────────────────────────────
 
 function strArg(value: PyValue | undefined, fnName: string, argName: string): string {
-  if (value !== undefined && isString(value)) return value.value;
-  throw new TypeError(`${fnName}() ${argName} must be a str, not ${value === undefined ? 'NoneType' : pyTypeName(value)}`, 0, 0);
+  if (typeof value === 'string') return value;
+  throw new TypeError(`${fnName}() ${argName} must be a str, not ${value === undefined ? 'NoneType' : typeName(value)}`);
 }
 
 function intArg(value: PyValue | undefined, fallback: number): number {
-  if (value === undefined || isNone(value)) return fallback;
-  if (isNumber(value)) return value.value;
-  throw new TypeError(`expected int, got ${pyTypeName(value)}`, 0, 0);
+  if (value === undefined || value === null) return fallback;
+  if (typeof value === 'number') return value;
+  throw new TypeError(`expected int, got ${typeName(value)}`);
+}
+
+function pick(args: PyValue[], kwargs: Kwargs, index: number, name: string): PyValue | undefined {
+  return args[index] ?? kwargs?.get(name);
+}
+
+// ── Pattern objects ──────────────────────────────────────────────────────────
+
+class PyPattern extends PyObject {
+  readonly typeName = 're.Pattern';
+
+  constructor(readonly regex: RegExp, private readonly source: string) {
+    super();
+  }
+
+  repr(): string {
+    return `re.compile(${strRepr(this.source)})`;
+  }
+
+  getAttr(name: string): PyValue | undefined {
+    const { regex } = this;
+    const onString = (op: (regex: RegExp, subject: string) => PyValue) =>
+      method(name, (_rt, args) => op(regex, strArg(args[0], name, 'string')));
+    switch (name) {
+      case 'pattern': return this.source;
+      case 'search': return onString(opSearch);
+      case 'match': return onString(opMatch);
+      case 'fullmatch': return onString(opFullmatch);
+      case 'findall': return onString(opFindall);
+      case 'finditer': return onString(opFinditer);
+      case 'sub':
+        return method('sub', (rt, args, kwargs) =>
+          andThen(opSub(rt, regex, args[0], strArg(args[1], 'sub', 'string'), intArg(pick(args, kwargs, 2, 'count'), 0)),
+            (r) => r.result), true);
+      case 'subn':
+        return method('subn', (rt, args, kwargs) =>
+          andThen(opSub(rt, regex, args[0], strArg(args[1], 'subn', 'string'), intArg(pick(args, kwargs, 2, 'count'), 0)),
+            (r) => new PyTuple([r.result, r.n])), true);
+      case 'split':
+        return method('split', (_rt, args, kwargs) =>
+          opSplit(regex, strArg(args[0], 'split', 'string'), intArg(pick(args, kwargs, 1, 'maxsplit'), 0)), true);
+      default: return undefined;
+    }
+  }
 }
 
 /** First argument of the module-level functions: a pattern string or a
  *  compiled Pattern object. */
 function regexFrom(value: PyValue | undefined, flags: number, fnName: string): RegExp {
-  if (value !== undefined && isString(value)) return compilePattern(value.value, flags);
-  const compiled = value && (value as any).__regex;
-  if (compiled instanceof RegExp) {
+  if (typeof value === 'string') return compilePattern(value, flags);
+  if (value instanceof PyPattern) {
     if (flags !== 0) reError('cannot process flags argument with a compiled pattern');
-    return compiled;
+    return value.regex;
   }
-  throw new TypeError(`${fnName}() pattern must be a str or compiled pattern, not ${value === undefined ? 'NoneType' : pyTypeName(value)}`, 0, 0);
+  throw new TypeError(`${fnName}() pattern must be a str or compiled pattern, not ${value === undefined ? 'NoneType' : typeName(value)}`);
 }
 
 // ── Module assembly ──────────────────────────────────────────────────────────
 
-function makePatternObject(regex: RegExp, patternSource: string): PyValue {
-  const attrs = new Map<string, PyValue>();
-  attrs.set('pattern', pyString(patternSource));
-  attrs.set('search', method('re.Pattern.search', (s: PyValue) => opSearch(regex, strArg(s, 'search', 'string'))));
-  attrs.set('match', method('re.Pattern.match', (s: PyValue) => opMatch(regex, strArg(s, 'match', 'string'))));
-  attrs.set('fullmatch', method('re.Pattern.fullmatch', (s: PyValue) => opFullmatch(regex, strArg(s, 'fullmatch', 'string'))));
-  attrs.set('findall', method('re.Pattern.findall', (s: PyValue) => opFindall(regex, strArg(s, 'findall', 'string'))));
-  attrs.set('finditer', method('re.Pattern.finditer', (s: PyValue) => opFinditer(regex, strArg(s, 'finditer', 'string'))));
-  attrs.set('sub', method('re.Pattern.sub', (...rawArgs: any[]) => {
-    const { args, kwargs } = extractKwargs(rawArgs);
-    const { result } = opSub(regex, args[0], strArg(args[1], 'sub', 'string'), intArg(args[2] ?? kwargs.count, 0));
-    return pyString(result);
-  }, true));
-  attrs.set('subn', method('re.Pattern.subn', (...rawArgs: any[]) => {
-    const { args, kwargs } = extractKwargs(rawArgs);
-    const { result, n } = opSub(regex, args[0], strArg(args[1], 'subn', 'string'), intArg(args[2] ?? kwargs.count, 0));
-    return pyTuple([pyString(result), pyNumber(n)]);
-  }, true));
-  attrs.set('split', method('re.Pattern.split', (...rawArgs: any[]) => {
-    const { args, kwargs } = extractKwargs(rawArgs);
-    return opSplit(regex, strArg(args[0], 'split', 'string'), intArg(args[1] ?? kwargs.maxsplit, 0));
-  }, true));
-
-  const obj: PyValue = {
-    type: 'builtin',
-    name: 're.Pattern',
-    attrs,
-    fn: () => { throw new TypeError("'re.Pattern' object is not callable", 0, 0); },
-  };
-  (obj as any).__regex = regex;
-  return obj;
-}
-
 /** Module-level function that takes (pattern, string, flags=0). */
 function patternStringFn(name: string, op: (regex: RegExp, subject: string) => PyValue): PyBuiltin {
-  return method(`re.${name}`, (...rawArgs: any[]) => {
-    const { args, kwargs } = extractKwargs(rawArgs);
-    const flags = intArg(args[2] ?? kwargs.flags, 0);
-    const regex = regexFrom(args[0], flags, name);
+  return method(name, (_rt, args, kwargs) => {
+    const regex = regexFrom(args[0], intArg(pick(args, kwargs, 2, 'flags'), 0), name);
     return op(regex, strArg(args[1], name, 'string'));
   }, true);
 }
 
 function createReModule(): PyModule {
   const attrs = new Map<string, PyValue>([
-    ['I', pyNumber(FLAG_I)],
-    ['IGNORECASE', pyNumber(FLAG_I)],
-    ['M', pyNumber(FLAG_M)],
-    ['MULTILINE', pyNumber(FLAG_M)],
-    ['S', pyNumber(FLAG_S)],
-    ['DOTALL', pyNumber(FLAG_S)],
-    ['X', pyNumber(FLAG_X)],
-    ['VERBOSE', pyNumber(FLAG_X)],
-    ['A', pyNumber(FLAG_A)],
-    ['ASCII', pyNumber(FLAG_A)],
+    ['I', FLAG_I],
+    ['IGNORECASE', FLAG_I],
+    ['M', FLAG_M],
+    ['MULTILINE', FLAG_M],
+    ['S', FLAG_S],
+    ['DOTALL', FLAG_S],
+    ['X', FLAG_X],
+    ['VERBOSE', FLAG_X],
+    ['A', FLAG_A],
+    ['ASCII', FLAG_A],
+    // Invalid patterns raise ValueError here, so `except re.error` catches them.
+    ['error', exceptionType(ValueError)],
 
     ['search', patternStringFn('search', opSearch)],
     ['match', patternStringFn('match', opMatch)],
@@ -400,42 +407,30 @@ function createReModule(): PyModule {
     ['finditer', patternStringFn('finditer', opFinditer)],
   ]);
 
-  attrs.set('compile', method('re.compile', (...rawArgs: any[]) => {
-    const { args, kwargs } = extractKwargs(rawArgs);
+  attrs.set('compile', method('compile', (_rt, args, kwargs) => {
     const pattern = strArg(args[0], 'compile', 'pattern');
-    const flags = intArg(args[1] ?? kwargs.flags, 0);
-    return makePatternObject(compilePattern(pattern, flags), pattern);
+    return new PyPattern(compilePattern(pattern, intArg(pick(args, kwargs, 1, 'flags'), 0)), pattern);
   }, true));
 
-  attrs.set('sub', method('re.sub', (...rawArgs: any[]) => {
-    const { args, kwargs } = extractKwargs(rawArgs);
-    const flags = intArg(args[4] ?? kwargs.flags, 0);
-    const regex = regexFrom(args[0], flags, 'sub');
-    const { result } = opSub(regex, args[1], strArg(args[2], 'sub', 'string'), intArg(args[3] ?? kwargs.count, 0));
-    return pyString(result);
+  const sub = (name: 'sub' | 'subn') => method(name, (rt, args, kwargs) => {
+    const regex = regexFrom(args[0], intArg(pick(args, kwargs, 4, 'flags'), 0), name);
+    const done = opSub(rt, regex, args[1], strArg(args[2], name, 'string'), intArg(pick(args, kwargs, 3, 'count'), 0));
+    return andThen(done, (r): PyValue => (name === 'sub' ? r.result : new PyTuple([r.result, r.n])));
+  }, true);
+  attrs.set('sub', sub('sub'));
+  attrs.set('subn', sub('subn'));
+
+  attrs.set('split', method('split', (_rt, args, kwargs) => {
+    const regex = regexFrom(args[0], intArg(pick(args, kwargs, 3, 'flags'), 0), 'split');
+    return opSplit(regex, strArg(args[1], 'split', 'string'), intArg(pick(args, kwargs, 2, 'maxsplit'), 0));
   }, true));
 
-  attrs.set('subn', method('re.subn', (...rawArgs: any[]) => {
-    const { args, kwargs } = extractKwargs(rawArgs);
-    const flags = intArg(args[4] ?? kwargs.flags, 0);
-    const regex = regexFrom(args[0], flags, 'subn');
-    const { result, n } = opSub(regex, args[1], strArg(args[2], 'subn', 'string'), intArg(args[3] ?? kwargs.count, 0));
-    return pyTuple([pyString(result), pyNumber(n)]);
-  }, true));
-
-  attrs.set('split', method('re.split', (...rawArgs: any[]) => {
-    const { args, kwargs } = extractKwargs(rawArgs);
-    const flags = intArg(args[3] ?? kwargs.flags, 0);
-    const regex = regexFrom(args[0], flags, 'split');
-    return opSplit(regex, strArg(args[1], 'split', 'string'), intArg(args[2] ?? kwargs.maxsplit, 0));
-  }, true));
-
-  attrs.set('escape', method('re.escape', (s: PyValue) => {
+  attrs.set('escape', method('escape', (_rt, args) => {
     // CPython 3.7+ escapes exactly the special characters (its _special_chars_map).
-    return pyString(strArg(s, 'escape', 'pattern').replace(/[()[\]{}?*+\-|^$\\.&~# \t\n\r\v\f]/g, ch => '\\' + ch));
+    return strArg(args[0], 'escape', 'pattern').replace(/[()[\]{}?*+\-|^$\\.&~# \t\n\r\v\f]/g, (ch) => '\\' + ch);
   }));
 
-  return { type: 'module', name: 're', attrs };
+  return new PyModule('re', attrs);
 }
 
 export const reModule: PyModule = createReModule();

@@ -1,85 +1,37 @@
-# Missing / Broken Python Features
+# What defanged does not do
 
-Tested against the current codebase on 2026-04-19. Items marked ✅ have been fixed.
+The README's "Not supported" table gives the rationale for the deliberate gaps. This file is the working list, including the gaps that are simply not built yet.
 
----
+## Left out on purpose
 
-## Language constructs (parser-level)
+- `class` definitions, and with them `with`, `super`, `property`, user-defined exceptions
+- `match` statements
+- `async` / `await` (tool calls already look synchronous)
+- `exec`, `eval`, `compile`, `open`, `input`, `__import__`, `globals`, `locals`
+- `bytes`, `bytearray`, `str.encode()`
+- Every module except `datetime`, `math`, `statistics`, `re`
 
-1. **`class` definitions** — `class Foo:` fails with "Unexpected token: COLON"
-2. ✅ ~~`raise` statement~~
-3. ✅ ~~`del` statement~~
-4. ✅ ~~`assert` statement~~
-5. ✅ ~~`global` / `nonlocal` declarations~~
-6. ✅ ~~`yield` / generators~~
-7. **`with` statement (context managers)** — fails at parse
-8. ✅ ~~`for...else` / `while...else`~~
-9. ✅ ~~`try...except...else`~~
-10. ✅ ~~`@decorator` syntax~~
-11. ✅ ~~`*args` / `**kwargs` in function definitions~~
-12. ✅ ~~`*args` / `**kwargs` unpacking in calls~~
-13. ✅ ~~`*` starred assignment~~
-14. ✅ ~~Slice assignment~~
-15. ✅ ~~Backslash line continuation~~
-16. ✅ ~~Implicit string concatenation~~
+## Deliberate differences from CPython
 
-## Operators
+- A list, dict or set default argument is copied on each call.
+- `d.get(key, default)` returns `default` when the key holds `None`.
+- `None` counts as `0` in `+`, `-` and `*` next to a number.
+- Sets iterate in insertion order.
+- `datetime.fromisoformat()` converts an offset into the session timezone and returns a naive datetime.
 
-17. ✅ ~~Bitwise AND `&`~~
-18. ✅ ~~Bitwise OR `|`~~
-19. ✅ ~~Bitwise XOR `^`~~
-20. ✅ ~~Bitwise NOT `~`~~
-21. ✅ ~~Left shift `<<`~~
-22. ✅ ~~Right shift `>>`~~
-23. ✅ ~~`%` string formatting~~
+## Not built yet
 
-## Missing builtins
-
-24. ✅ ~~`chr()`~~
-25. ✅ ~~`ord()`~~
-26. ✅ ~~`hex()`~~
-27. ✅ ~~`oct()`~~
-28. ✅ ~~`bin()`~~
-29. ✅ ~~`pow()`~~
-30. ✅ ~~`divmod()`~~
-31. **`hasattr()`** — not applicable without class support
-32. **`getattr()`** — not applicable without class support
-33. ✅ ~~`callable()`~~
-34. ✅ ~~`iter()` / `next()`~~
-35. ✅ ~~`id()`~~
-36. ✅ ~~`hash()`~~
-37. ✅ ~~`tuple()` constructor~~
-38. **`input()`** — intentionally unsupported in sandbox
-
-## Missing string methods
-
-39. ✅ ~~`str.isupper()` / `str.islower()`~~
-40. ✅ ~~`str.isnumeric()` / `str.isdecimal()` / `str.isidentifier()` / `str.isprintable()`~~ — ✅ `str.istitle()` also added
-41. ✅ ~~`str.partition()` / `str.rpartition()`~~
-42. ✅ ~~`str.splitlines()`~~
-43. ✅ ~~`str.expandtabs()`~~
-44. ✅ ~~`str.removeprefix()` / `str.removesuffix()`~~
-45. **`str.encode()`** — intentionally unsupported (no bytes type)
-46. ✅ ~~`str.maketrans()` / `str.translate()`~~
-
-## Missing dict methods
-
-47. ✅ ~~`dict.popitem()`~~
-48. ✅ ~~`dict.fromkeys()`~~
-
-## Semantic / runtime bugs
-
-49. ✅ ~~`print(sep=...)` ignored~~
-50. ✅ ~~`print(end=...)` ignored~~
-51. ✅ ~~`dict(a=1, b=2)` returns empty dict~~
-52. ✅ ~~`enumerate(start=N)` keyword form ignored~~
-53. ✅ ~~`isinstance()` only accepts type name as string~~
-54. ✅ ~~`isinstance()` with tuple of types~~
-55. ✅ ~~`int()` ignores base argument~~
-56. ✅ ~~`round()` doesn't do banker's rounding~~
-57. ✅ ~~`sorted()` can't compare tuples~~
-58. ✅ ~~`list.sort(key=lambda: fn_call)` fails~~
-59. **`except ... as e` — `e` is a string, not an exception object** — minor: type(e) returns `<class 'str'>`
-60. ✅ ~~`str.format()` with keyword args~~
-61. **Escape `\n` in single-line strings** — may be a test-harness issue with how source is passed
-62. **Default mutable arguments not shared across calls** — intentional deviation; safer for sandboxed use
+- `complex` numbers. `(-8) ** 0.5` raises `ValueError` instead of returning a complex.
+- `frozenset`, `collections`, `itertools`, `json`, `functools`. Models reach for `json.dumps`, `Counter`, `defaultdict` and `itertools.groupby` often; these are the most useful next additions and all are pure computation.
+- `gen.throw()`, `send()` through `yield from`, and running `finally` blocks of a generator that is dropped or closed half-way.
+- `range()` with bounds beyond 2^53 (raises `OverflowError`).
+- `\N{NAME}` string escapes (a syntax error that says to use `\uXXXX`).
+- `statistics.variance` and `stdev` use floating-point sums, so the last digit can differ from CPython's exact fractions. `mean` is exact.
+- Error positions count lines from the first non-blank line of the source.
+- Exception chaining: `raise X from Y` parses but `__cause__` is not kept.
+- Tracebacks. An error carries the line and column where it was raised, not the call chain.
+- `datetime.time`, aware datetimes, `astimezone()`.
+- `str.title()` for titlecase digraphs such as `ǅ`.
+- Slices inside a tuple index (`a[1:2, 3]`).
+- `math.sqrt(-1)` says `math domain error`; CPython 3.14 says `expected a nonnegative input, got -1.0`.
+- `print(..., end="")` reaches `onPrint` as a separate call with the `end` text appended, so the host cannot tell it from a full line.

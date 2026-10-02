@@ -78,6 +78,11 @@ export enum TokenType {
   DOUBLE_SLASH_ASSIGN = 'DOUBLE_SLASH_ASSIGN', // //=
   PERCENT_ASSIGN = 'PERCENT_ASSIGN',           // %=
   DOUBLE_STAR_ASSIGN = 'DOUBLE_STAR_ASSIGN',   // **=
+  AMPERSAND_ASSIGN = 'AMPERSAND_ASSIGN',       // &=
+  PIPE_ASSIGN = 'PIPE_ASSIGN',                 // |=
+  CARET_ASSIGN = 'CARET_ASSIGN',               // ^=
+  LSHIFT_ASSIGN = 'LSHIFT_ASSIGN',             // <<=
+  RSHIFT_ASSIGN = 'RSHIFT_ASSIGN',             // >>=
 
   // Delimiters
   LPAREN = 'LPAREN',       // (
@@ -90,6 +95,8 @@ export enum TokenType {
   COLON = 'COLON',         // :
   DOT = 'DOT',             // .
   AT = 'AT',               // @
+  ARROW = 'ARROW',         // ->
+  ELLIPSIS = 'ELLIPSIS',   // ...
 
   // Whitespace (Python-specific)
   NEWLINE = 'NEWLINE',
@@ -100,13 +107,23 @@ export enum TokenType {
   EOF = 'EOF',
 }
 
+export interface FStringTokenPart {
+  text: string;
+  expr: string | null;
+  formatSpec?: string;
+  /** `!r`, `!s` or `!a` conversion, without the `!`. */
+  conversion?: string;
+}
+
 export interface Token {
   type: TokenType;
-  value: string | number | null;
+  value: string | number | bigint | null;
   line: number;
   column: number;
+  /** NUMBER tokens: true for a float literal (`1.0`, `1e3`), false for an int. */
+  isFloat?: boolean;
   // For f-strings: array of string parts and expression strings
-  fstringParts?: Array<{ text: string; expr: string | null; formatSpec?: string }>;
+  fstringParts?: FStringTokenPart[];
 }
 
 export const KEYWORDS: Record<string, TokenType> = {

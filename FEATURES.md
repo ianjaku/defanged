@@ -1,6 +1,10 @@
-# tespy-parser: Feature Support Matrix
+# defanged: feature support matrix
 
-A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not, based on `tests/features.test.ts` (**939 pass / 0 fail** as of 2026-07-10).
+A Python interpreter implemented in TypeScript. This document describes which Python features are supported and which are not. Three test files back it:
+
+- `tests/features.test.ts` pins each feature below.
+- `tests/conformance.test.ts` runs the programs in `tests/conformance/cases.ts` and compares what they print with a recorded CPython 3.14 run.
+- `tests/vm.test.ts` covers what CPython cannot check: tool calls, resource limits, and the boundary with the host.
 
 Explanations are written for TypeScript developers who may not know Python.
 
@@ -16,6 +20,24 @@ Explanations are written for TypeScript developers who may not know Python.
 
 ## ✅ Working Features
 
+### Numbers
+```python
+2 ** 100          # 1267650600228229401496703205376, ints are exact at any size
+10 ** 18 + 1      # 1000000000000000001
+6 / 2             # 3.0, `/` always gives a float
+7 // 2            # 3, floor division of ints gives an int
+7 // 2.0          # 3.0
+type(6 / 2)       # <class 'float'>
+1 == 1.0          # True, but they print differently: 1 and 1.0
+round(2.5)        # 2, ties round to even
+sum([0.1] * 10)   # 1.0, float sums are compensated like CPython 3.12+
+```
+`int` and `float` are distinct types, unlike TS's single `number`. An int is stored as a JS number while it fits in the safe-integer range and as a `BigInt` beyond it, so arithmetic never silently rounds. Floats print with CPython's rules (`1e+16`, `1e-05`, `-0.0`, `inf`, `nan`).
+
+Two bounds keep huge ints from hanging the host. An int may have at most 1,000,000 bits (`2 ** 10**9` raises `MemoryError`). Converting an int with more than 4,300 digits to or from a string raises `ValueError`, the same limit CPython applies.
+
+When an int beyond 2^53 is returned to the host it becomes the nearest JS number. Return `str(n)` to keep every digit.
+
 ### Augmented assignment
 ```python
 x += 1    # works  (like TS: x += 1)
@@ -26,7 +48,7 @@ x //= 3   # floor-divide and assign
 x %= 3    # modulo and assign
 x **= 2   # power and assign
 ```
-Python's `+=`, `-=`, `*=`, `/=`, `//=`, `%=`, `**=` behave like the TypeScript equivalents (with `//` being floor division, which has no TS operator).
+Python's `+=`, `-=`, `*=`, `/=`, `//=`, `%=`, `**=` behave like the TypeScript equivalents (with `//` being floor division, which has no TS operator). The bitwise forms `&=`, `|=`, `^=`, `<<=`, `>>=` work too. On a list, `+=` extends the list in place, so every other name bound to it sees the change.
 
 ### Chained assignment
 ```python
@@ -81,12 +103,13 @@ Note the shared-reference caveat with mutable values: `a = b = []` means `a` and
 - `str(123)` → `"123"` — like `String(123)` in TS
 - `str(True)` → `"True"` (note: Python capitalizes booleans)
 - `str([1, 2])` → `"[1, 2]"` (prints list representation)
-- `float("3.14")` → `3.14`, `float(5)` → `5.0`
-- `int("42")` → `42`, `int(True)` → `1`
+- `float("3.14")` → `3.14`, `float(5)` → `5.0`, `float("inf")` → `inf`
+- `int("42")` → `42`, `int(True)` → `1`, `int("ff", 16)` → `255`
 - `int(-3.9)` → `-3` (truncates toward zero, like CPython)
 - `int("3.14")` → raises `ValueError` (only whole-integer strings accepted)
+- `repr("it's")` → `"it's"`, `repr("a\nb")` → `'a\\nb'` (quotes and escapes chosen like CPython)
 
-Python has no separate `int` vs. `float` types in TS's sense — both are JS `number` internally, but Python prints `1` vs. `1.0` differently. The interpreter preserves that distinction.
+Strings are sequences of code points, as in Python: `len("😀")` is `1` (JS's `.length` says `2`), and indexing or slicing never splits a character.
 
 ### Tuples
 ```python
@@ -103,6 +126,8 @@ a, b, c = [10, 20, 30]  # destructure from list
 (1,) < (1, 2)       # a strict prefix is smaller → True
 ```
 Comparing a tuple to a list, or elements of incomparable types, raises `TypeError` like CPython (`'<' not supported between instances of 'str' and 'int'`).
+
+`zip()`, `enumerate()`, `dict.items()` and `divmod()` produce tuples, so `sorted(d.items())` prints `[('a', 1), ('b', 2)]`. A tuple returned to the host becomes a JS array.
 A tuple is conceptually a fixed-size, immutable array. Python uses them for multi-return values:
 ```python
 def divmod(a, b):
@@ -122,27 +147,31 @@ lst.extend([4, 5])     # like lst.push(...[4, 5])
 lst.index(2)           # like lst.indexOf(2) but throws if not found
 lst.count(2)           # count occurrences
 lst.reverse()          # in-place
-lst.sort()             # in-place
+lst.sort()             # in-place; key= and reverse= work, and the sort is stable
 lst.clear()            # empty the list
 lst.copy()             # shallow copy
 ```
-Also supported: slicing (`lst[1:3]`, `lst[::-1]`), negative indices, `in` membership, list comprehensions (`[x*2 for x in lst if x > 0]`).
+Also supported: slicing (`lst[1:3]`, `lst[::-1]`), negative indices, `in` membership, list comprehensions (`[x*2 for x in lst if x > 0]`), spreading (`[*a, *b]`), and slice assignment and deletion including a step (`lst[::2] = ...`, `del lst[1:3]`).
 
 ### Dicts (Python's plain object / Map)
 ```python
 d = {"a": 1, "b": 2}
 d["a"]                 # 1
 d.get("c", 0)          # default if missing — no TS equivalent for plain objects
-d.keys()               # Object.keys(d)
-d.values()             # Object.values(d)
-d.items()              # Object.entries(d)
+d.keys()               # Object.keys(d), as a live view: dict_keys(['a', 'b'])
+d.values()             # Object.values(d), as a live view
+d.items()              # Object.entries(d), as a live view of (key, value) tuples
 d.update({"c": 3})     # Object.assign(d, {c: 3})
 d.pop("a")             # remove and return
 d.setdefault("x", 0)   # get, or set-and-return default
 dict.fromkeys(["a","b"], 0) # {"a": 0, "b": 0} — static constructor
 "a" in d               # d.hasOwnProperty("a")
 ```
-Dict comprehensions (`{k: v for k, v in items}`) also work.
+Dict comprehensions (`{k: v for k, v in items}`) also work, as do merging with `{**a, **b}` and `a | b`, and `dict(zip(keys, values))`.
+
+`d.keys()`, `d.values()` and `d.items()` return views, as in CPython. You can loop over them, take `len()`, test membership and pass them to `list()` or `sorted()`, but not index them (`d.keys()[0]` is a `TypeError`). Adding or removing a key while looping over a dict raises `RuntimeError`.
+
+One deliberate deviation: `d.get(key, default)` also returns `default` when the key is present with the value `None`. Tool results carry JSON nulls, and `row.get("amount", 0)` is meant to give a usable number.
 
 Keys can be any hashable value — strings, numbers, booleans, `None`, dates, and tuples of hashables (the multi-dimension group-by idiom):
 ```python
@@ -160,9 +189,12 @@ Like CPython, `True`/`1`/`1.0` are the same key, and unhashable keys (lists, dic
 - `*args` (rest parameter): `def f(*args): return len(args)` — like `function f(...args)` in TS
 - `**kwargs` (keyword rest): `def f(**kwargs): return kwargs["key"]` — collects keyword args into a dict
 - `*list` / `**dict` unpacking in calls: `f(*args, **kwargs)` — spreads iterables/dicts into arguments
+- Keyword-only parameters: `def f(a, *, b=1)`; the positional-only marker `/` is accepted
+- Type annotations parse and are ignored: `def f(a: int, b: str = "x") -> str:` and `total: float = 0.0`
+- Wrong calls raise CPython's `TypeError` messages (`f() missing 1 required positional argument: 'b'`)
 - `@decorator` syntax — decorators wrap functions, applied bottom-up
 - Recursion, nested functions, closures
-- Lambdas: `lambda x: x * 2` — like `(x) => x * 2`
+- Lambdas: `lambda x: x * 2` — like `(x) => x * 2`; defaults, `*args` and `**kwargs` work
 - Early return with `return`
 
 ### Control flow
@@ -176,23 +208,39 @@ Like CPython, `True`/`1`/`1.0` are the same key, and unhashable keys (lists, dic
 - `try / except / else / finally` (Python's name for catch)
 - Chained comparisons: `1 < x < 10` (equivalent to `1 < x && x < 10`)
 - Short-circuit `and` / `or` (note: they return the operand, not a boolean — like `&&` / `||` in TS)
-- Semicolons separate simple statements on one line: `a = 1; b = 2` (single-line suites like `if x: y = 1` are **not** supported — use a newline and indent)
+- Semicolons separate simple statements on one line: `a = 1; b = 2`
+- One-line bodies: `if x: y = 1`, `for i in xs: print(i)`, `def f(): return 1`
+- Runaway recursion raises a catchable `RecursionError` at 1,000 nested calls (100 when each level goes through a built-in callback, such as a recursive `sorted` key)
 
 ### Built-ins
-Working: `len`, `range`, `print` *(with `sep`/`end` kwargs)*, `abs`, `min`, `max`, `sum`, `round` *(banker's rounding)*, `sorted`, `reversed`, `enumerate` *(with `start=`)*, `zip`, `map`, `filter`, `any`, `all`, `type`, `isinstance` *(accepts type builtins and tuples)*, `repr`, `hex`, `oct`, `bin`, `ord`, `chr`, `pow` *(with optional modulo)*, `divmod`, `callable`, `iter`, `next`, `hash`, `id`, `tuple`.
+Working: `len`, `range` *(lazy, like CPython)*, `print` *(with `sep`/`end` kwargs)*, `abs`, `min` / `max` *(with `key=` and `default=`)*, `sum`, `round` *(banker's rounding)*, `sorted`, `reversed`, `enumerate` *(with `start=`)*, `zip`, `map`, `filter`, `any`, `all`, `type`, `isinstance` *(accepts types and tuples of types)*, `issubclass`, `repr`, `ascii`, `format`, `hex`, `oct`, `bin`, `ord`, `chr`, `pow` *(with optional modulo)*, `divmod`, `callable`, `iter`, `next`, `hash`, `id`, `getattr`, `hasattr`, and the type constructors `int`, `float`, `str`, `bool`, `list`, `tuple`, `dict`, `set`, `slice`.
 
-Exception constructors: `Exception`, `ValueError`, `TypeError`, `KeyError`, `IndexError`, `ZeroDivisionError`, `NameError`, `RuntimeError`, `MemoryError`, `ToolError` — all work with `raise` and `except`. `ToolError` (a `RuntimeError` subclass, sandbox-specific) is raised when a JS tool handler throws, so scripts can implement fallbacks; `MemoryError` is raised when an allocation would exceed the host's configured limits. The host-side `maxIterations` and `timeoutMs` bounds are deliberately **not** catchable — not even by a bare `except:` — so a `try` inside a loop can't neutralize them.
+`map`, `filter`, `zip` and `enumerate` return lazy iterators, so `next(map(f, xs))` calls `f` once. `type(x)` returns a type object: `type(x) == int`, `type(x).__name__` and `isinstance(True, int)` behave as in CPython. `__name__` is `"__main__"`, so the usual `if __name__ == "__main__":` guard runs.
 
-Error messages use CPython's type names and wording (`'str'`, `'int'`, `'NoneType'` — not the interpreter's internal names) and carry a real `Line N, Column N` position, including errors raised inside built-ins. Models self-correct by pattern-matching CPython error text, so this wording is part of the behavioral contract. Unsupported constructs that models emit anyway (`class`, `with`, `async`/`await`) fail at parse time with a targeted message saying the construct is unsupported and what to do instead, rather than a generic `Unexpected token`.
+### Exceptions
+```python
+try:
+    int("abc")
+except ValueError as e:
+    str(e)             # "invalid literal for int() with base 10: 'abc'"
+    e.args             # ("invalid literal for int() with base 10: 'abc'",)
+    type(e).__name__   # 'ValueError'
+    raise              # re-raises the same exception
+```
+An exception is an object, not a string. As in CPython, the name after `as` is unbound again when the handler ends. The classes form CPython's hierarchy: `Exception`, `ArithmeticError` (`ZeroDivisionError`, `OverflowError`), `LookupError` (`KeyError`, `IndexError`), `ValueError`, `TypeError`, `AttributeError`, `NameError` (`UnboundLocalError`), `RuntimeError` (`RecursionError`, `NotImplementedError`, `ToolError`), `AssertionError`, `StopIteration`, `ImportError` (`ModuleNotFoundError`), `MemoryError`. `except LookupError` therefore catches a `KeyError`. `raise X from Y` parses; the cause is ignored.
 
-### F-strings (most cases)
+`ToolError` (sandbox-specific) is raised when a JS tool handler throws, so scripts can implement fallbacks; `MemoryError` is raised when an allocation would exceed the host's configured limits. The host-side `maxIterations` and `timeoutMs` bounds are deliberately **not** catchable — not even by a bare `except:`, and `finally` blocks do not run for them — so a `try` inside a loop can't neutralize them.
+
+Error messages use CPython 3.14's type names and wording (`name 'x' is not defined`, `division by zero`, `'str' object has no attribute 'push'`) and carry a real `Line N, Column N` position, including errors raised inside built-ins. Models self-correct by pattern-matching CPython error text, so this wording is part of the behavioral contract. Unsupported constructs that models emit anyway (`class`, `with`, `match`, `async`/`await`, `b"..."`) fail at parse time with a targeted message saying the construct is unsupported and what to do instead, rather than a generic `Unexpected token`. Absent built-ins such as `open` and `eval` raise a `NameError` that says why they are absent.
+
+### F-strings
 ```python
 name = "Alice"
 f"hello {name}"                   # "hello Alice"
 f"{1 + 2}"                        # "3"
 f"{[x for x in range(3)]}"        # "[0, 1, 2]"
 ```
-F-strings are like TS template literals (`` `hello ${name}` ``), but use `{...}` instead of `${...}`.
+F-strings are like TS template literals (`` `hello ${name}` ``), but use `{...}` instead of `${...}`. Also supported: `{x!r}` / `{x!s}` / `{x!a}` conversions, the debug form `{x=}`, and a format spec that itself interpolates (`{value:{width}.{precision}f}`).
 
 ### Sets
 Set literals, `set()`, comprehensions, methods, and operators all work:
@@ -253,8 +301,11 @@ f"{42:d}"          # "42"     — integer format
 f"{42:08b}"        # "00101010" — binary, zero-padded to width 8
 f"{255:x}"         # "ff"     — hex
 f"{'hi':>10}"      # "        hi" — right-aligned in width 10
+f"{1234567.891:,.2f}"   # "1,234,567.89" — thousands separator
+f"{0.256:.1%}"     # "25.6%"
+f"{12:+d}"         # "+12"
 ```
-The `:<spec>` portion supports precision (`.Nf`), type (`d`, `f`, `b`, `o`, `x`, `X`, `e`, `E`), width, alignment (`<`, `>`, `^`), and zero-fill.
+The spec is Python's full format mini-language: fill and alignment (`<`, `>`, `^`, `=`), sign (`+`, `-`, space), `#`, zero-fill, width, grouping (`,` and `_`), precision, and the types `d b o x X c e E f F g G n %` and `s`. `format(value, spec)` and `"{:>8.2f}".format(value)` use the same code, and `"%05.1f" % value` supports the printf flags.
 
 ### Boolean arithmetic
 ```python
@@ -298,9 +349,11 @@ Supported:
 - `StopIteration` exception when exhausted
 - `next(gen, default)` returns `default` instead of raising `StopIteration`
 
-Not yet supported:
-- `gen.send(value)` — sending values into a generator
-- `gen.throw()` / `gen.close()` — generator cleanup protocol
+- `x = yield value` with `gen.send(value)`, and `gen.close()`
+- `result = yield from sub()` receives the sub-generator's return value
+- Generator expressions are lazy: `next(x for x in rows if x > 1)` stops at the first match
+
+Not supported: `gen.throw()`, and `yield from` does not pass `send()` values through to the inner generator. A generator that is dropped or closed half-way does not run its `finally` blocks.
 
 ### Importable modules
 
@@ -345,7 +398,7 @@ Known limitations:
 - No `tzinfo` / aware datetimes, no `astimezone()`, no `datetime.time` (time-of-day) class, no `fold`.
 - `datetime.now()` reflects the injected clock and session timezone, not the process-local timezone (CPython uses the machine's local time).
 
-JS `Date` objects returned by tool handlers (e.g. timestamp columns from a database driver) marshal into naive `datetime` values in the session timezone — the same wall clock `datetime.now()` uses.
+JS `Date` objects returned by tool handlers (e.g. timestamp columns from a database driver) marshal into naive `datetime` values in the session timezone — the same wall clock `datetime.now()` uses. An invalid `Date` raises `ValueError`, and an instant outside the years 1 to 9999 raises `OverflowError`, which is also what `fromisoformat()` raises when an offset pushes the result out of that range.
 
 ### The `math` module
 
@@ -360,7 +413,7 @@ JS `Date` objects returned by tool handlers (e.g. timestamp columns from a datab
 | `isclose(a, b, rel_tol=, abs_tol=)` | Tolerant float comparison | no stdlib analogue |
 | `pi`, `e`, `tau`, `inf`, `nan` | Constants | `Math.PI`, `Infinity`, `NaN` |
 
-Domain errors match CPython: `sqrt(-1)`, `log(0)`, `asin(2)` raise `ValueError: math domain error`; `exp(1000)` raises `OverflowError: math range error`. `inf`/`nan` print as Python does (`'inf'`, not JavaScript's `'Infinity'`).
+Results are floats (`math.sqrt(16)` is `4.0`), except `floor`/`ceil`/`trunc`, which return ints. Domain errors raise `ValueError: math domain error` for `sqrt(-1)`, `log(0)`, `asin(2)` (CPython 3.14 words these differently per function); `exp(1000)` raises `OverflowError: math range error`. `inf`/`nan` print as Python does (`'inf'`, not JavaScript's `'Infinity'`).
 
 Not included: `factorial`/`comb`/`perm` (unbounded loops, no agent use case), `gcd`/`hypot`/`fsum` (easy future adds), float plumbing (`frexp`, `ldexp`, `ulp`).
 
@@ -376,7 +429,7 @@ Not included: `factorial`/`comb`/`perm` (unbounded loops, no agent use case), `g
 | `quantiles(data, n=4, method='exclusive')` | Cut points (quartiles, deciles, percentiles) | no stdlib analogue |
 | `StatisticsError` | Raised on empty/insufficient data; subclasses `ValueError` | — |
 
-Inputs accept lists, tuples, sets, and `range()`; elements may be numbers or booleans (plus strings for `mode`). Not included: generator inputs (wrap in `list()`, same as `sum()`), `xbar=` on variance/stdev, `fmean`/`geometric_mean`/`harmonic_mean`/`median_low`/`median_high`.
+Inputs accept any iterable, generators included; elements may be numbers or booleans (plus any hashable value for `mode`). As in CPython, an exact result of int data stays an int (`mean([1, 2, 3])` is `2`, `mean([1, 2])` is `1.5`). Not included: `xbar=` on variance/stdev, `fmean`/`geometric_mean`/`harmonic_mean`/`median_low`/`median_high`.
 
 ### The `re` module
 
@@ -387,21 +440,21 @@ Backed by JavaScript `RegExp` — Python patterns are translated to the JS diale
 | `search(p, s)` / `match(p, s)` / `fullmatch(p, s)` | First match anywhere / anchored at start / whole string; `None` when no match | `s.match(re)` |
 | `findall(p, s)` | All matches: strings, group strings, or tuples per CPython's group-count rules | `s.match(/…/g)` |
 | `finditer(p, s)` | Iterator of match objects | `s.matchAll(re)` |
-| `sub(p, repl, s, count=0)` / `subn` | Replace; `repl` supports `\1`, `\g<name>`, `\\`, `\n` | `s.replace(re, r)` |
+| `sub(p, repl, s, count=0)` / `subn` | Replace; `repl` is a template (`\1`, `\g<name>`, `\\`, `\n`) or a function called with each match | `s.replace(re, r)` |
 | `split(p, s, maxsplit=0)` | Split, captured groups included in the result | `s.split(re)` |
 | `compile(p, flags=0)` | Pattern object with all of the above as methods, plus `.pattern` | `new RegExp(p)` |
 | `escape(s)` | Escape special characters (CPython 3.7+ set) | manual replace |
-| `m.group(...)`, `m.groups()`, `m.groupdict()`, `m.start/end/span()` | Match object accessors, including named groups | `m.groups`, `m.index` |
+| `m.group(...)`, `m[0]`, `m.groups()`, `m.groupdict()`, `m.start/end/span()` | Match object accessors, including named groups | `m.groups`, `m.index` |
 | `IGNORECASE`/`I`, `MULTILINE`/`M`, `DOTALL`/`S`, `ASCII`/`A` | Flags, combinable with `\|`; inline `(?i)` etc. also work | `i` / `m` / `s` RegExp flags |
 | `(?P<name>…)`, `(?P=name)`, `\A`, `\Z`, `(?#…)` | Python-only syntax, translated for JS | `(?<name>…)`, `\k<name>` |
 
-**Dialect caveats** (JS `RegExp` under the hood): `\d`/`\w`/`\s` are ASCII-only (CPython's default is Unicode-aware; this matches `re.ASCII` behavior, so the `ASCII` flag is a no-op); `$` does not match before a trailing newline like Python's does (use `\Z` semantics or `re.M`). Not supported, with targeted errors: `re.VERBOSE`/`(?x)`, scoped inline flags `(?i:…)`, conditional groups `(?(id)…)`, and callable `sub()` replacements (use `finditer` and build the string). Invalid patterns raise a catchable `ValueError` instead of `re.error`.
+**Dialect caveats** (JS `RegExp` under the hood): `\d`/`\w`/`\s` are ASCII-only (CPython's default is Unicode-aware; this matches `re.ASCII` behavior, so the `ASCII` flag is a no-op); `$` does not match before a trailing newline like Python's does (use `\Z` semantics or `re.M`). Not supported, with targeted errors: `re.VERBOSE`/`(?x)`, scoped inline flags `(?i:…)` and conditional groups `(?(id)…)`. Invalid patterns raise `ValueError`; `re.error` is an alias for it, so `except re.error:` works.
 
 ---
 
 ## ❌ Known Missing Features
 
-See `missing.md` for the full list. Major gaps: `class` definitions, `with` statement (context managers).
+See `missing.md` for the full list and the reasons. The big ones are `class` definitions, the `with` statement, `match`, `async`/`await`, and every module outside `datetime`, `math`, `statistics` and `re`.
 
 ---
 
@@ -436,5 +489,3 @@ Quick reference for the most confusing translations:
 | `is` / `is not` | `===` / `!==` (roughly) | identity check, not equality |
 
 ---
-
-*Generated from `tests/features.test.ts` against commit `a2c3413`.*

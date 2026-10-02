@@ -7,27 +7,12 @@
  * naive datetimes.
  */
 
+import { AttributeError, OverflowError, TypeError, ValueError } from './errors';
+import { PyFloat, isNum, toFloat } from './numbers';
 import {
-  PyValue,
-  PyBuiltin,
-  PyDate,
-  PyDateTime,
-  PyTimeDelta,
-  PyModule,
-  pyNumber,
-  pyString,
-  pyDate,
-  pyDatetime,
-  pyTimedelta,
-  isNumber,
-  isString,
-  isDate,
-  isDatetime,
-  isTimedelta,
-  pyTypeName,
+  Kwargs, NativeFn, PyBuiltin, PyDate, PyDateTime, PyModule, PyTimeDelta, PyType, PyValue,
+  T_DATE, T_DATETIME, T_TIMEDELTA, typeName,
 } from './values';
-import { extractKwargs } from './builtins';
-import { TypeError, ValueError } from './errors';
 
 // ── Calendar helpers ─────────────────────────────────────────────────────────
 
@@ -46,24 +31,24 @@ function daysInMonth(year: number, month: number): number {
   return DAYS_IN_MONTH[month - 1];
 }
 
-function validateDate(year: number, month: number, day: number, line: number, column: number): void {
+function validateDate(year: number, month: number, day: number): void {
   if (!Number.isInteger(year) || year < 1 || year > 9999) {
-    throw new ValueError(`year ${year} is out of range`, line, column);
+    throw new ValueError(`year must be in 1..9999, not ${year}`);
   }
   if (!Number.isInteger(month) || month < 1 || month > 12) {
-    throw new ValueError('month must be in 1..12', line, column);
+    throw new ValueError(`month must be in 1..12, not ${month}`);
   }
   if (!Number.isInteger(day) || day < 1 || day > daysInMonth(year, month)) {
-    throw new ValueError('day is out of range for month', line, column);
+    throw new ValueError(`day ${day} must be in range 1..${daysInMonth(year, month)} for month ${month} in year ${year}`);
   }
 }
 
-function validateTime(hour: number, minute: number, second: number, microsecond: number, line: number, column: number): void {
-  if (!Number.isInteger(hour) || hour < 0 || hour > 23) throw new ValueError('hour must be in 0..23', line, column);
-  if (!Number.isInteger(minute) || minute < 0 || minute > 59) throw new ValueError('minute must be in 0..59', line, column);
-  if (!Number.isInteger(second) || second < 0 || second > 59) throw new ValueError('second must be in 0..59', line, column);
+function validateTime(hour: number, minute: number, second: number, microsecond: number): void {
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) throw new ValueError(`hour must be in 0..23, not ${hour}`);
+  if (!Number.isInteger(minute) || minute < 0 || minute > 59) throw new ValueError(`minute must be in 0..59, not ${minute}`);
+  if (!Number.isInteger(second) || second < 0 || second > 59) throw new ValueError(`second must be in 0..59, not ${second}`);
   if (!Number.isInteger(microsecond) || microsecond < 0 || microsecond > 999999) {
-    throw new ValueError('microsecond must be in 0..999999', line, column);
+    throw new ValueError(`microsecond must be in 0..999999, not ${microsecond}`);
   }
 }
 
@@ -119,7 +104,7 @@ function makeTimedelta(ms: number, us: number): PyTimeDelta {
   const remMs = ms - days * MS_PER_DAY;
   const seconds = Math.floor(remMs / 1000);
   const microseconds = (remMs - seconds * 1000) * 1000 + us;
-  return pyTimedelta(days, seconds, microseconds);
+  return new PyTimeDelta(days, seconds, microseconds);
 }
 
 /** Build a timedelta from a possibly fractional millisecond total, rounding
@@ -157,43 +142,47 @@ export function isoformatDatetime(dt: PyDateTime, sep = 'T'): string {
 }
 
 export function datetimeRepr(value: PyDate | PyDateTime | PyTimeDelta): string {
-  switch (value.type) {
-    case 'date':
-      return `datetime.date(${value.year}, ${value.month}, ${value.day})`;
-    case 'datetime': {
-      // CPython always shows hour and minute, appends second and microsecond
-      // only when needed.
-      const parts = [value.year, value.month, value.day, value.hour, value.minute];
-      if (value.second || value.microsecond) parts.push(value.second);
-      if (value.microsecond) parts.push(value.microsecond);
-      return `datetime.datetime(${parts.join(', ')})`;
-    }
-    case 'timedelta': {
-      const parts: string[] = [];
-      if (value.days) parts.push(`days=${value.days}`);
-      if (value.seconds) parts.push(`seconds=${value.seconds}`);
-      if (value.microseconds) parts.push(`microseconds=${value.microseconds}`);
-      return parts.length ? `datetime.timedelta(${parts.join(', ')})` : 'datetime.timedelta(0)';
-    }
+  if (value instanceof PyDate) return `datetime.date(${value.year}, ${value.month}, ${value.day})`;
+  if (value instanceof PyDateTime) {
+    // CPython always shows hour and minute, appends second and microsecond
+    // only when needed.
+    const parts = [value.year, value.month, value.day, value.hour, value.minute];
+    if (value.second || value.microsecond) parts.push(value.second);
+    if (value.microsecond) parts.push(value.microsecond);
+    return `datetime.datetime(${parts.join(', ')})`;
   }
+  const parts: string[] = [];
+  if (value.days) parts.push(`days=${value.days}`);
+  if (value.seconds) parts.push(`seconds=${value.seconds}`);
+  if (value.microseconds) parts.push(`microseconds=${value.microseconds}`);
+  return parts.length ? `datetime.timedelta(${parts.join(', ')})` : 'datetime.timedelta(0)';
 }
 
 export function datetimeStr(value: PyDate | PyDateTime | PyTimeDelta): string {
-  switch (value.type) {
-    case 'date':
-      return isoformatDate(value);
-    case 'datetime':
-      return isoformatDatetime(value, ' ');
-    case 'timedelta': {
-      const hours = Math.floor(value.seconds / 3600);
-      const minutes = Math.floor((value.seconds % 3600) / 60);
-      const seconds = value.seconds % 60;
-      let s = `${hours}:${pad(minutes, 2)}:${pad(seconds, 2)}`;
-      if (value.microseconds) s += `.${pad(value.microseconds, 6)}`;
-      if (value.days) s = `${value.days} day${Math.abs(value.days) !== 1 ? 's' : ''}, ${s}`;
-      return s;
-    }
-  }
+  if (value instanceof PyDate) return isoformatDate(value);
+  if (value instanceof PyDateTime) return isoformatDatetime(value, ' ');
+  const hours = Math.floor(value.seconds / 3600);
+  const minutes = Math.floor((value.seconds % 3600) / 60);
+  const seconds = value.seconds % 60;
+  let s = `${hours}:${pad(minutes, 2)}:${pad(seconds, 2)}`;
+  if (value.microseconds) s += `.${pad(value.microseconds, 6)}`;
+  if (value.days) s = `${value.days} day${Math.abs(value.days) !== 1 ? 's' : ''}, ${s}`;
+  return s;
+}
+
+function fromComponents(c: Components): PyDateTime {
+  return new PyDateTime(c.year, c.month, c.day, c.hour, c.minute, c.second, c.microsecond);
+}
+
+function componentsOf(value: PyDate | PyDateTime): Components {
+  if (value instanceof PyDateTime) return value;
+  return { year: value.year, month: value.month, day: value.day, hour: 0, minute: 0, second: 0, microsecond: 0 };
+}
+
+/** A date or datetime rendered through a format spec, which is a strftime
+ *  pattern (`f"{d:%Y-%m}"`). */
+export function formatDatetime(value: PyDate | PyDateTime, spec: string): string {
+  return strftime(componentsOf(value), spec);
 }
 
 // ── strftime / strptime ──────────────────────────────────────────────────────
@@ -244,7 +233,7 @@ const STRPTIME_PATTERNS: Record<string, string> = {
   B: `(${MONTH_NAMES.join('|')})`,
 };
 
-function strptimeComponents(s: string, fmt: string, line: number, column: number): Components {
+function strptimeComponents(s: string, fmt: string): Components {
   let pattern = '';
   const fields: string[] = [];
   for (let i = 0; i < fmt.length; i++) {
@@ -252,11 +241,11 @@ function strptimeComponents(s: string, fmt: string, line: number, column: number
       const code = fmt[++i];
       if (code === '%') {
         pattern += '%';
-      } else if (STRPTIME_PATTERNS[code]) {
+      } else if (Object.hasOwn(STRPTIME_PATTERNS, code)) {
         pattern += STRPTIME_PATTERNS[code];
         fields.push(code);
       } else {
-        throw new ValueError(`'${code}' is a bad directive in format '${fmt}'`, line, column);
+        throw new ValueError(`'${code}' is a bad directive in format '${fmt}'`);
       }
     } else {
       pattern += escapeRegex(fmt[i]);
@@ -264,7 +253,7 @@ function strptimeComponents(s: string, fmt: string, line: number, column: number
   }
   const match = s.match(new RegExp(`^${pattern}$`, 'i'));
   if (!match) {
-    throw new ValueError(`time data '${s}' does not match format '${fmt}'`, line, column);
+    throw new ValueError(`time data '${s}' does not match format '${fmt}'`);
   }
 
   const c: Components = { year: 1900, month: 1, day: 1, hour: 0, minute: 0, second: 0, microsecond: 0 };
@@ -303,8 +292,8 @@ function strptimeComponents(s: string, fmt: string, line: number, column: number
     c.month = month;
     c.day = remaining;
   }
-  validateDate(c.year, c.month, c.day, line, column);
-  validateTime(c.hour, c.minute, c.second, c.microsecond, line, column);
+  validateDate(c.year, c.month, c.day);
+  validateTime(c.hour, c.minute, c.second, c.microsecond);
   return c;
 }
 
@@ -312,14 +301,9 @@ function strptimeComponents(s: string, fmt: string, line: number, column: number
 
 const ISO_DATETIME = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?)?(Z|[+-]\d{2}:\d{2})?$/;
 
-function parseIsoDatetime(
-  s: string,
-  toSessionTz: (ms: number) => Components,
-  line: number,
-  column: number
-): PyDateTime {
+function parseIsoDatetime(s: string, toSessionTz: (ms: number) => Components): PyDateTime {
   const m = s.match(ISO_DATETIME);
-  if (!m) throw new ValueError(`Invalid isoformat string: '${s}'`, line, column);
+  if (!m) throw new ValueError(`Invalid isoformat string: '${s}'`);
   const [, year, month, day, hour, minute, second, fraction, offset] = m;
   const c: Components = {
     year: parseInt(year, 10),
@@ -330,8 +314,8 @@ function parseIsoDatetime(
     second: second ? parseInt(second, 10) : 0,
     microsecond: fraction ? parseInt(fraction.padEnd(6, '0'), 10) : 0,
   };
-  validateDate(c.year, c.month, c.day, line, column);
-  validateTime(c.hour, c.minute, c.second, c.microsecond, line, column);
+  validateDate(c.year, c.month, c.day);
+  validateTime(c.hour, c.minute, c.second, c.microsecond);
   if (offset) {
     // Deviation from CPython (which would build an aware datetime): convert
     // the instant into the session timezone and keep the result naive.
@@ -343,9 +327,9 @@ function parseIsoDatetime(
     const epochMs = utcMillis(c.year, c.month, c.day, c.hour, c.minute, c.second) - offsetMinutes * 60_000;
     const local = toSessionTz(epochMs);
     local.microsecond = c.microsecond;
-    return pyDatetime(local);
+    return fromComponents(local);
   }
-  return pyDatetime(c);
+  return fromComponents(c);
 }
 
 // ── Session timezone conversion ──────────────────────────────────────────────
@@ -354,18 +338,16 @@ function parseIsoDatetime(
 // creating many short-lived interpreters stays cheap.
 const tzConverterCache = new Map<string, (ms: number) => Components>();
 
-/** Wall-clock components of an instant in the given IANA timezone. Throws a
- *  RangeError on an invalid timezone name — callers validate eagerly. */
-export function makeTzConverter(timezone: string): (ms: number) => Components {
-  const cached = tzConverterCache.get(timezone);
-  if (cached) return cached;
+/** Wall-clock components of an instant in a timezone, asked of Intl every
+ *  time. Correct for any instant, but costs microseconds per call. */
+export function makeIntlConverter(timezone: string): (ms: number) => Components {
   const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone: timezone,
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
     hourCycle: 'h23',
   });
-  const converter = (ms: number): Components => {
+  return (ms: number): Components => {
     const parts: Record<string, number> = {};
     for (const part of formatter.formatToParts(new Date(ms))) {
       if (part.type !== 'literal') parts[part.type] = parseInt(part.value, 10);
@@ -377,94 +359,161 @@ export function makeTzConverter(timezone: string): (ms: number) => Components {
       microsecond: (((ms % 1000) + 1000) % 1000) * 1000,
     };
   };
+}
+
+/** How many days to remember per timezone. */
+const MAX_CACHED_DAYS = 4096;
+
+const MIN_INSTANT = utcMillis(1, 1, 1);
+const MAX_INSTANT = utcMillis(9999, 12, 31, 23, 59, 59) + 999;
+
+/** What is known about one UTC day in a timezone: its constant offset in
+ *  ms, that it was asked about once, or that its offset changes (DST). */
+type DayOffset = number | 'seen' | 'varies';
+
+/** Wall-clock components of an instant in the given IANA timezone. Throws a
+ *  RangeError on an invalid timezone name — callers validate eagerly. */
+export function makeTzConverter(timezone: string): (ms: number) => Components {
+  const cached = tzConverterCache.get(timezone);
+  if (cached) return cached;
+  const viaIntl = makeIntlConverter(timezone);
+
+  // A table of tool rows asks about the same days over and over. From the
+  // second row of a day on, its offset is reused instead of asking Intl.
+  const days = new Map<number, DayOffset>();
+  const offsetAt = (ms: number): number => {
+    const c = viaIntl(ms);
+    return utcMillis(c.year, c.month, c.day, c.hour, c.minute, c.second) - ms;
+  };
+  const constantOffset = (day: number): number | undefined => {
+    let known = days.get(day);
+    if (typeof known === 'number') return known;
+    if (known === undefined) {
+      // Starting over is cheap: a day costs one Intl call the first time,
+      // the same as having no cache.
+      if (days.size >= MAX_CACHED_DAYS) days.clear();
+      known = 'seen';
+    } else if (known === 'seen') {
+      const start = offsetAt(day * MS_PER_DAY);
+      known = start === offsetAt((day + 1) * MS_PER_DAY) ? start : 'varies';
+    }
+    days.set(day, known);
+    return typeof known === 'number' ? known : undefined;
+  };
+
+  const converter = (instant: number): Components => {
+    if (!(instant >= MIN_INSTANT && instant <= MAX_INSTANT)) {
+      throw Number.isFinite(instant)
+        ? new OverflowError('date value out of range')
+        : new ValueError('invalid date: the timestamp is not a number');
+    }
+    // A host clock may report fractions of a millisecond; keep them as microseconds.
+    const ms = Math.floor(instant);
+    const us = Math.floor((instant - ms) * 1000);
+    let c: Components;
+    if (timezone === 'UTC') {
+      c = msUsToComponents(ms, us);
+    } else {
+      const offset = constantOffset(Math.floor(ms / MS_PER_DAY));
+      if (offset !== undefined) {
+        c = msUsToComponents(ms + offset, us);
+      } else {
+        c = viaIntl(ms);
+        c.microsecond += us;
+      }
+    }
+    if (c.year < 1 || c.year > 9999) throw new OverflowError('date value out of range');
+    return c;
+  };
   tzConverterCache.set(timezone, converter);
   return converter;
 }
 
 // ── Operators ────────────────────────────────────────────────────────────────
 
-export function isDatetimeLike(value: PyValue): value is PyDate | PyDateTime | PyTimeDelta {
-  return value.type === 'date' || value.type === 'datetime' || value.type === 'timedelta';
+function isDateLike(v: PyValue): v is PyDate | PyDateTime {
+  return v instanceof PyDate || v instanceof PyDateTime;
 }
 
-/** Binary operators involving date/datetime/timedelta. Returns null to fall
- *  through to the interpreter's generic unsupported-operand TypeError. */
-export function datetimeBinaryOp(op: string, left: PyValue, right: PyValue, line: number, column: number): PyValue | null {
+function dateFromMs(ms: number): PyDate {
+  const c = msUsToComponents(ms, 0);
+  return new PyDate(c.year, c.month, c.day);
+}
+
+/** Binary operators involving date/datetime/timedelta. Returns undefined to
+ *  fall through to the generic unsupported-operand TypeError. */
+export function datetimeBinaryOp(op: string, left: PyValue, right: PyValue): PyValue | undefined {
+  const leftDelta = left instanceof PyTimeDelta ? left : undefined;
+  const rightDelta = right instanceof PyTimeDelta ? right : undefined;
+  if (!leftDelta && !rightDelta && !(isDateLike(left) && isDateLike(right))) return undefined;
+
   if (op === '+') {
-    if (isTimedelta(left) && isTimedelta(right)) {
-      const a = timedeltaToMsUs(left), b = timedeltaToMsUs(right);
+    if (leftDelta && rightDelta) {
+      const a = timedeltaToMsUs(leftDelta), b = timedeltaToMsUs(rightDelta);
       return makeTimedelta(a.ms + b.ms, a.us + b.us);
     }
     // datetime/date + timedelta is commutative.
-    if (isTimedelta(left) && (isDatetime(right) || isDate(right))) {
-      return datetimeBinaryOp('+', right, left, line, column);
+    if (leftDelta && isDateLike(right)) return datetimeBinaryOp('+', right, left);
+    if (left instanceof PyDateTime && rightDelta) {
+      const a = datetimeToMsUs(left), b = timedeltaToMsUs(rightDelta);
+      return fromComponents(msUsToComponents(a.ms + b.ms, a.us + b.us));
     }
-    if (isDatetime(left) && isTimedelta(right)) {
-      const a = datetimeToMsUs(left), b = timedeltaToMsUs(right);
-      return pyDatetime(msUsToComponents(a.ms + b.ms, a.us + b.us));
-    }
-    if (isDate(left) && isTimedelta(right)) {
+    if (left instanceof PyDate && rightDelta) {
       // CPython uses only whole days of the timedelta for date arithmetic.
-      const c = msUsToComponents(utcMillis(left.year, left.month, left.day) + right.days * MS_PER_DAY, 0);
-      return pyDate(c.year, c.month, c.day);
+      return dateFromMs(utcMillis(left.year, left.month, left.day) + rightDelta.days * MS_PER_DAY);
     }
   }
 
   if (op === '-') {
-    if (isTimedelta(left) && isTimedelta(right)) {
-      const a = timedeltaToMsUs(left), b = timedeltaToMsUs(right);
+    if (leftDelta && rightDelta) {
+      const a = timedeltaToMsUs(leftDelta), b = timedeltaToMsUs(rightDelta);
       return makeTimedelta(a.ms - b.ms, a.us - b.us);
     }
-    if (isDatetime(left) && isDatetime(right)) {
+    if (left instanceof PyDateTime && right instanceof PyDateTime) {
       const a = datetimeToMsUs(left), b = datetimeToMsUs(right);
       return makeTimedelta(a.ms - b.ms, a.us - b.us);
     }
-    if (isDate(left) && isDate(right)) {
+    if (left instanceof PyDate && right instanceof PyDate) {
       const days = Math.round((utcMillis(left.year, left.month, left.day) - utcMillis(right.year, right.month, right.day)) / MS_PER_DAY);
-      return pyTimedelta(days, 0, 0);
+      return new PyTimeDelta(days, 0, 0);
     }
-    if (isDatetime(left) && isTimedelta(right)) {
-      const a = datetimeToMsUs(left), b = timedeltaToMsUs(right);
-      return pyDatetime(msUsToComponents(a.ms - b.ms, a.us - b.us));
+    if (left instanceof PyDateTime && rightDelta) {
+      const a = datetimeToMsUs(left), b = timedeltaToMsUs(rightDelta);
+      return fromComponents(msUsToComponents(a.ms - b.ms, a.us - b.us));
     }
-    if (isDate(left) && isTimedelta(right)) {
-      const c = msUsToComponents(utcMillis(left.year, left.month, left.day) - right.days * MS_PER_DAY, 0);
-      return pyDate(c.year, c.month, c.day);
+    if (left instanceof PyDate && rightDelta) {
+      return dateFromMs(utcMillis(left.year, left.month, left.day) - rightDelta.days * MS_PER_DAY);
     }
   }
 
   if (op === '*') {
-    const td = isTimedelta(left) ? left : isTimedelta(right) ? right : null;
-    const num = isNumber(left) ? left : isNumber(right) ? right : null;
-    if (td && num) {
+    const td = leftDelta ?? rightDelta!;
+    const factor = leftDelta ? right : left;
+    if (isNum(factor)) {
       const { ms, us } = timedeltaToMsUs(td);
-      return timedeltaFromFloatMs((ms + us / 1000) * num.value);
+      return timedeltaFromFloatMs((ms + us / 1000) * toFloat(factor));
     }
   }
 
-  if (op === '/' && isTimedelta(left)) {
-    const a = timedeltaToMsUs(left);
-    if (isNumber(right)) {
-      return timedeltaFromFloatMs((a.ms + a.us / 1000) / right.value);
-    }
-    if (isTimedelta(right)) {
-      const b = timedeltaToMsUs(right);
-      return pyNumber((a.ms + a.us / 1000) / (b.ms + b.us / 1000));
+  if (op === '/' && leftDelta) {
+    const a = timedeltaToMsUs(leftDelta);
+    if (isNum(right)) return timedeltaFromFloatMs((a.ms + a.us / 1000) / toFloat(right));
+    if (rightDelta) {
+      const b = timedeltaToMsUs(rightDelta);
+      return new PyFloat((a.ms + a.us / 1000) / (b.ms + b.us / 1000));
     }
   }
 
-  if (op === '//' && isTimedelta(left)) {
-    const a = timedeltaToMsUs(left);
-    if (isNumber(right) && Number.isInteger(right.value)) {
-      return makeTimedelta(0, Math.floor((a.ms * 1000 + a.us) / right.value));
-    }
-    if (isTimedelta(right)) {
-      const b = timedeltaToMsUs(right);
-      return pyNumber(Math.floor((a.ms + a.us / 1000) / (b.ms + b.us / 1000)));
+  if (op === '//' && leftDelta) {
+    const a = timedeltaToMsUs(leftDelta);
+    if (typeof right === 'number') return makeTimedelta(0, Math.floor((a.ms * 1000 + a.us) / right));
+    if (rightDelta) {
+      const b = timedeltaToMsUs(rightDelta);
+      return Math.floor((a.ms + a.us / 1000) / (b.ms + b.us / 1000));
     }
   }
 
-  return null;
+  return undefined;
 }
 
 export function negateTimedelta(td: PyTimeDelta): PyTimeDelta {
@@ -472,113 +521,107 @@ export function negateTimedelta(td: PyTimeDelta): PyTimeDelta {
   return makeTimedelta(-ms, -us);
 }
 
-/** Three-way comparison for same-type date/datetime/timedelta pairs; null when
- *  the pair is not ordering-comparable by this module. Mixing date and
- *  datetime raises, matching CPython. */
-export function datetimeOrdering(a: PyValue, b: PyValue, line: number, column: number): number | null {
-  if ((isDate(a) && isDatetime(b)) || (isDatetime(a) && isDate(b))) {
-    throw new TypeError("can't compare datetime.datetime to datetime.date", line, column);
-  }
-  if (a.type !== b.type) return null;
-  if (isDate(a) || isDatetime(a)) {
-    const da = a as PyDateTime, db = b as PyDateTime;
+/** Three-way comparison for same-type date/datetime/timedelta pairs;
+ *  undefined when the pair has no ordering, which includes a date against a
+ *  datetime, as in CPython. */
+export function datetimeOrdering(a: PyValue, b: PyValue): number | undefined {
+  if ((a instanceof PyDate && b instanceof PyDate) || (a instanceof PyDateTime && b instanceof PyDateTime)) {
+    const x = componentsOf(a), y = componentsOf(b);
     return (
-      (da.year - db.year) ||
-      (da.month - db.month) ||
-      (da.day - db.day) ||
-      ((da.hour ?? 0) - (db.hour ?? 0)) ||
-      ((da.minute ?? 0) - (db.minute ?? 0)) ||
-      ((da.second ?? 0) - (db.second ?? 0)) ||
-      ((da.microsecond ?? 0) - (db.microsecond ?? 0))
+      (x.year - y.year) || (x.month - y.month) || (x.day - y.day) ||
+      (x.hour - y.hour) || (x.minute - y.minute) || (x.second - y.second) ||
+      (x.microsecond - y.microsecond)
     );
   }
-  if (isTimedelta(a)) {
-    const ta = a as PyTimeDelta, tb = b as PyTimeDelta;
-    return (ta.days - tb.days) || (ta.seconds - tb.seconds) || (ta.microseconds - tb.microseconds);
+  if (a instanceof PyTimeDelta && b instanceof PyTimeDelta) {
+    return (a.days - b.days) || (a.seconds - b.seconds) || (a.microseconds - b.microseconds);
   }
-  return null;
+  return undefined;
 }
 
 // ── Attribute / method access ────────────────────────────────────────────────
 
-const TYPE_DISPLAY: Record<string, string> = {
-  date: 'datetime.date',
-  datetime: 'datetime.datetime',
-  timedelta: 'datetime.timedelta',
-};
-
-function method(name: string, fn: PyBuiltin['fn'], acceptsKwargs = false): PyBuiltin {
-  return { type: 'builtin', name, fn, acceptsKwargs };
+function method(name: string, fn: NativeFn, kw = false): PyBuiltin {
+  return new PyBuiltin(name, fn, kw);
 }
 
-function intArg(value: PyValue | undefined, name: string, fallback: number, line: number, column: number): number {
+function intArg(value: PyValue | undefined, fallback: number): number {
   if (value === undefined) return fallback;
-  if (!isNumber(value) || !Number.isInteger(value.value)) {
-    throw new TypeError(`an integer is required (got ${name})`, line, column);
-  }
-  return value.value;
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  if (typeof value !== 'number') throw new TypeError(`'${typeName(value)}' object cannot be interpreted as an integer`);
+  return value;
 }
 
-export function getDatetimeAttr(obj: PyDate | PyDateTime | PyTimeDelta, attr: string, line: number, column: number): PyValue {
-  if (isTimedelta(obj)) {
+function noAttribute(obj: PyValue, attr: string): AttributeError {
+  return new AttributeError(`'${typeName(obj)}' object has no attribute '${attr}'`);
+}
+
+export function getDatetimeAttr(obj: PyDate | PyDateTime | PyTimeDelta, attr: string): PyValue {
+  if (obj instanceof PyTimeDelta) {
     switch (attr) {
-      case 'days': return pyNumber(obj.days);
-      case 'seconds': return pyNumber(obj.seconds);
-      case 'microseconds': return pyNumber(obj.microseconds);
-      case 'total_seconds': return method('timedelta.total_seconds', () =>
-        pyNumber(obj.days * 86400 + obj.seconds + obj.microseconds / 1e6));
+      case 'days': return obj.days;
+      case 'seconds': return obj.seconds;
+      case 'microseconds': return obj.microseconds;
+      case 'total_seconds': return method('total_seconds', () =>
+        new PyFloat(obj.days * 86400 + obj.seconds + obj.microseconds / 1e6));
     }
-    throw new TypeError(`'${TYPE_DISPLAY[obj.type]}' object has no attribute '${attr}'`, line, column);
+    throw noAttribute(obj, attr);
   }
 
-  const c: Components = isDatetime(obj)
-    ? obj
-    : { year: obj.year, month: obj.month, day: obj.day, hour: 0, minute: 0, second: 0, microsecond: 0 };
-
+  const c = componentsOf(obj);
   switch (attr) {
-    case 'year': return pyNumber(obj.year);
-    case 'month': return pyNumber(obj.month);
-    case 'day': return pyNumber(obj.day);
-    case 'isoformat': return method(`${TYPE_DISPLAY[obj.type]}.isoformat`, () =>
-      pyString(isDatetime(obj) ? isoformatDatetime(obj) : isoformatDate(obj)));
-    case 'strftime': return method(`${TYPE_DISPLAY[obj.type]}.strftime`, (fmt: PyValue) => {
-      if (!isString(fmt)) throw new TypeError('strftime() argument must be str', line, column);
-      return pyString(strftime(c, fmt.value));
+    case 'year': return obj.year;
+    case 'month': return obj.month;
+    case 'day': return obj.day;
+    case 'isoformat': return method('isoformat', () =>
+      obj instanceof PyDateTime ? isoformatDatetime(obj) : isoformatDate(obj));
+    case 'strftime': return method('strftime', (_rt, args) => {
+      if (typeof args[0] !== 'string') throw new TypeError('strftime() argument must be str');
+      return strftime(c, args[0]);
     });
-    case 'weekday': return method(`${TYPE_DISPLAY[obj.type]}.weekday`, () =>
-      pyNumber(weekdayOf(obj.year, obj.month, obj.day)));
-    case 'replace': return method(`${TYPE_DISPLAY[obj.type]}.replace`, (...rawArgs: any[]) => {
-      const { kwargs } = extractKwargs(rawArgs);
+    case 'weekday': return method('weekday', () => weekdayOf(obj.year, obj.month, obj.day));
+    case 'isoweekday': return method('isoweekday', () => weekdayOf(obj.year, obj.month, obj.day) + 1);
+    case 'replace': return method('replace', (_rt, _args, kwargs) => {
       const r: Components = {
-        year: intArg(kwargs.year, 'year', c.year, line, column),
-        month: intArg(kwargs.month, 'month', c.month, line, column),
-        day: intArg(kwargs.day, 'day', c.day, line, column),
-        hour: intArg(kwargs.hour, 'hour', c.hour, line, column),
-        minute: intArg(kwargs.minute, 'minute', c.minute, line, column),
-        second: intArg(kwargs.second, 'second', c.second, line, column),
-        microsecond: intArg(kwargs.microsecond, 'microsecond', c.microsecond, line, column),
+        year: intArg(kwargs?.get('year'), c.year),
+        month: intArg(kwargs?.get('month'), c.month),
+        day: intArg(kwargs?.get('day'), c.day),
+        hour: intArg(kwargs?.get('hour'), c.hour),
+        minute: intArg(kwargs?.get('minute'), c.minute),
+        second: intArg(kwargs?.get('second'), c.second),
+        microsecond: intArg(kwargs?.get('microsecond'), c.microsecond),
       };
-      validateDate(r.year, r.month, r.day, line, column);
-      validateTime(r.hour, r.minute, r.second, r.microsecond, line, column);
-      return isDatetime(obj) ? pyDatetime(r) : pyDate(r.year, r.month, r.day);
+      validateDate(r.year, r.month, r.day);
+      validateTime(r.hour, r.minute, r.second, r.microsecond);
+      return obj instanceof PyDateTime ? fromComponents(r) : new PyDate(r.year, r.month, r.day);
     }, true);
   }
 
-  if (isDatetime(obj)) {
+  if (obj instanceof PyDateTime) {
     switch (attr) {
-      case 'hour': return pyNumber(obj.hour);
-      case 'minute': return pyNumber(obj.minute);
-      case 'second': return pyNumber(obj.second);
-      case 'microsecond': return pyNumber(obj.microsecond);
-      case 'date': return method('datetime.datetime.date', () => pyDate(obj.year, obj.month, obj.day));
-      case 'time': break; // no time class — fall through to the attribute error
+      case 'hour': return obj.hour;
+      case 'minute': return obj.minute;
+      case 'second': return obj.second;
+      case 'microsecond': return obj.microsecond;
+      case 'date': return method('date', () => new PyDate(obj.year, obj.month, obj.day));
+      // no time class: `.time` falls through to the attribute error
     }
   }
 
-  throw new TypeError(`'${TYPE_DISPLAY[obj.type]}' object has no attribute '${attr}'`, line, column);
+  throw noAttribute(obj, attr);
 }
 
 // ── Module factory ───────────────────────────────────────────────────────────
+
+/** A per-interpreter type object standing in for a shared one, so that
+ *  `isinstance(d, date)` holds while `date.today()` uses this session's clock. */
+function sessionType(shared: PyType, construct: NativeFn, attrs: [string, PyValue][]): PyType {
+  const type = new PyType(shared.name, shared.base, shared.qualName);
+  type.canonical = shared;
+  type.construct = construct;
+  type.attrs = new Map(attrs);
+  return type;
+}
 
 export function createDatetimeModule(now: () => number, timezone: string): PyModule {
   let toSessionTz: (ms: number) => Components;
@@ -588,77 +631,64 @@ export function createDatetimeModule(now: () => number, timezone: string): PyMod
     throw new Error(`Invalid timezone: '${timezone}'. Expected an IANA timezone name like 'Europe/Berlin' or 'UTC'.`);
   }
 
-  const datetimeCtor: PyBuiltin = {
-    type: 'builtin',
-    name: 'datetime.datetime',
-    acceptsKwargs: true,
-    fn: (...rawArgs: any[]) => {
-      const { args, kwargs } = extractKwargs(rawArgs);
-      const get = (i: number, name: string, fallback?: number): number => {
-        const value = args[i] ?? kwargs[name];
-        if (value === undefined) {
-          if (fallback === undefined) throw new TypeError(`function missing required argument: '${name}'`, 0, 0);
-          return fallback;
-        }
-        return intArg(value, name, NaN, 0, 0);
-      };
-      const c: Components = {
-        year: get(0, 'year'),
-        month: get(1, 'month'),
-        day: get(2, 'day'),
-        hour: get(3, 'hour', 0),
-        minute: get(4, 'minute', 0),
-        second: get(5, 'second', 0),
-        microsecond: get(6, 'microsecond', 0),
-      };
-      validateDate(c.year, c.month, c.day, 0, 0);
-      validateTime(c.hour, c.minute, c.second, c.microsecond, 0, 0);
-      return pyDatetime(c);
-    },
-    attrs: new Map<string, PyValue>([
-      ['now', method('datetime.datetime.now', () => pyDatetime(toSessionTz(now())))],
-      ['utcnow', method('datetime.datetime.utcnow', () => pyDatetime(msUsToComponents(now(), 0)))],
-      ['fromisoformat', method('datetime.datetime.fromisoformat', (s: PyValue) => {
-        if (!isString(s)) throw new TypeError('fromisoformat: argument must be str', 0, 0);
-        return parseIsoDatetime(s.value, toSessionTz, 0, 0);
-      })],
-      ['strptime', method('datetime.datetime.strptime', (s: PyValue, fmt: PyValue) => {
-        if (!isString(s) || !isString(fmt)) throw new TypeError('strptime() arguments must be str', 0, 0);
-        return pyDatetime(strptimeComponents(s.value, fmt.value, 0, 0));
-      })],
-    ]),
+  const field = (args: PyValue[], kwargs: Kwargs, i: number, name: string, fallback?: number): number => {
+    const value = args[i] ?? kwargs?.get(name);
+    if (value === undefined) {
+      if (fallback === undefined) throw new TypeError(`function missing required argument: '${name}'`);
+      return fallback;
+    }
+    return intArg(value, NaN);
   };
 
-  const dateCtor: PyBuiltin = {
-    type: 'builtin',
-    name: 'datetime.date',
-    acceptsKwargs: true,
-    fn: (...rawArgs: any[]) => {
-      const { args, kwargs } = extractKwargs(rawArgs);
-      const get = (i: number, name: string): number => {
-        const value = args[i] ?? kwargs[name];
-        if (value === undefined) throw new TypeError(`function missing required argument: '${name}'`, 0, 0);
-        return intArg(value, name, NaN, 0, 0);
-      };
-      const year = get(0, 'year'), month = get(1, 'month'), day = get(2, 'day');
-      validateDate(year, month, day, 0, 0);
-      return pyDate(year, month, day);
-    },
-    attrs: new Map<string, PyValue>([
-      ['today', method('datetime.date.today', () => {
-        const c = toSessionTz(now());
-        return pyDate(c.year, c.month, c.day);
-      })],
-      ['fromisoformat', method('datetime.date.fromisoformat', (s: PyValue) => {
-        if (!isString(s)) throw new TypeError('fromisoformat: argument must be str', 0, 0);
-        const m = s.value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-        if (!m) throw new ValueError(`Invalid isoformat string: '${s.value}'`, 0, 0);
-        const year = parseInt(m[1], 10), month = parseInt(m[2], 10), day = parseInt(m[3], 10);
-        validateDate(year, month, day, 0, 0);
-        return pyDate(year, month, day);
-      })],
-    ]),
-  };
+  const datetimeType = sessionType(T_DATETIME, (_rt, args, kwargs) => {
+    const c: Components = {
+      year: field(args, kwargs, 0, 'year'),
+      month: field(args, kwargs, 1, 'month'),
+      day: field(args, kwargs, 2, 'day'),
+      hour: field(args, kwargs, 3, 'hour', 0),
+      minute: field(args, kwargs, 4, 'minute', 0),
+      second: field(args, kwargs, 5, 'second', 0),
+      microsecond: field(args, kwargs, 6, 'microsecond', 0),
+    };
+    validateDate(c.year, c.month, c.day);
+    validateTime(c.hour, c.minute, c.second, c.microsecond);
+    return fromComponents(c);
+  }, [
+    ['now', method('now', () => fromComponents(toSessionTz(now())))],
+    ['utcnow', method('utcnow', () => fromComponents(msUsToComponents(now(), 0)))],
+    ['fromisoformat', method('fromisoformat', (_rt, args) => {
+      if (typeof args[0] !== 'string') throw new TypeError('fromisoformat: argument must be str');
+      return parseIsoDatetime(args[0], toSessionTz);
+    })],
+    ['strptime', method('strptime', (_rt, args) => {
+      if (typeof args[0] !== 'string' || typeof args[1] !== 'string') {
+        throw new TypeError('strptime() arguments must be str');
+      }
+      return fromComponents(strptimeComponents(args[0], args[1]));
+    })],
+  ]);
+
+  const dateType = sessionType(T_DATE, (_rt, args, kwargs) => {
+    const year = field(args, kwargs, 0, 'year');
+    const month = field(args, kwargs, 1, 'month');
+    const day = field(args, kwargs, 2, 'day');
+    validateDate(year, month, day);
+    return new PyDate(year, month, day);
+  }, [
+    ['today', method('today', () => {
+      const c = toSessionTz(now());
+      return new PyDate(c.year, c.month, c.day);
+    })],
+    ['fromisoformat', method('fromisoformat', (_rt, args) => {
+      const s = args[0];
+      if (typeof s !== 'string') throw new TypeError('fromisoformat: argument must be str');
+      const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!m) throw new ValueError(`Invalid isoformat string: '${s}'`);
+      const year = parseInt(m[1], 10), month = parseInt(m[2], 10), day = parseInt(m[3], 10);
+      validateDate(year, month, day);
+      return new PyDate(year, month, day);
+    })],
+  ]);
 
   const TIMEDELTA_KWARGS: Array<[string, number]> = [
     ['days', MS_PER_DAY],
@@ -670,34 +700,24 @@ export function createDatetimeModule(now: () => number, timezone: string): PyMod
     ['weeks', 7 * MS_PER_DAY],
   ];
 
-  const timedeltaCtor: PyBuiltin = {
-    type: 'builtin',
-    name: 'datetime.timedelta',
-    acceptsKwargs: true,
-    fn: (...rawArgs: any[]) => {
-      const { args, kwargs } = extractKwargs(rawArgs);
-      let totalMs = 0;
-      for (let i = 0; i < TIMEDELTA_KWARGS.length; i++) {
-        const [name, msPerUnit] = TIMEDELTA_KWARGS[i];
-        // Positional order matches CPython: days, seconds, microseconds.
-        const value = (i < 3 ? args[i] : undefined) ?? kwargs[name];
-        if (value === undefined) continue;
-        if (!isNumber(value)) throw new TypeError(`unsupported type for timedelta ${name} component: '${pyTypeName(value)}'`, 0, 0);
-        totalMs += value.value * msPerUnit;
-      }
-      return timedeltaFromFloatMs(totalMs);
-    },
-  };
+  const timedeltaType = sessionType(T_TIMEDELTA, (_rt, args, kwargs) => {
+    let totalMs = 0;
+    for (let i = 0; i < TIMEDELTA_KWARGS.length; i++) {
+      const [name, msPerUnit] = TIMEDELTA_KWARGS[i];
+      // Positional order matches CPython: days, seconds, microseconds.
+      const value = (i < 3 ? args[i] : undefined) ?? kwargs?.get(name);
+      if (value === undefined) continue;
+      if (!isNum(value)) throw new TypeError(`unsupported type for timedelta ${name} component: '${typeName(value)}'`);
+      totalMs += toFloat(value) * msPerUnit;
+    }
+    return timedeltaFromFloatMs(totalMs);
+  }, []);
 
-  return {
-    type: 'module',
-    name: 'datetime',
-    attrs: new Map<string, PyValue>([
-      ['datetime', datetimeCtor],
-      ['date', dateCtor],
-      ['timedelta', timedeltaCtor],
-      ['MINYEAR', pyNumber(1)],
-      ['MAXYEAR', pyNumber(9999)],
-    ]),
-  };
+  return new PyModule('datetime', new Map<string, PyValue>([
+    ['datetime', datetimeType],
+    ['date', dateType],
+    ['timedelta', timedeltaType],
+    ['MINYEAR', 1],
+    ['MAXYEAR', 9999],
+  ]));
 }

@@ -1033,11 +1033,11 @@ describe('Operator edge cases', () => {
   });
 
   test('floor division by zero raises', async () => {
-    await expect(runPython('5 // 0')).rejects.toThrow('Division by zero');
+    await expect(runPython('5 // 0')).rejects.toThrow('division by zero');
   });
 
   test('modulo by zero raises', async () => {
-    await expect(runPython('5 % 0')).rejects.toThrow('Division by zero');
+    await expect(runPython('5 % 0')).rejects.toThrow('division by zero');
   });
 
   test('string comparison operators', async () => {
@@ -1136,7 +1136,7 @@ describe('Error propagation', () => {
   });
 
   test('division by zero in expression', async () => {
-    await expect(runPython('1 + 1 / 0')).rejects.toThrow('Division by zero');
+    await expect(runPython('1 + 1 / 0')).rejects.toThrow('division by zero');
   });
 
   test('NameError in function body', async () => {
@@ -1144,7 +1144,7 @@ describe('Error propagation', () => {
 def f():
     return unknown_var
 f()
-`)).rejects.toThrow("Name 'unknown_var' is not defined");
+`)).rejects.toThrow("name 'unknown_var' is not defined");
   });
 
   test('TypeError for unsupported operand types', async () => {
@@ -1350,9 +1350,13 @@ result
     expect(await runPython('sum(map(lambda x: x * x, [1, 2, 3, 4]))')).toBe(30);
   });
 
-  test('len of iterator', async () => {
-    // len() of a range/iterator - probably not supported
-    await expect(runPython('len(range(5))')).rejects.toThrow();
+  test('len of a range', async () => {
+    expect(await runPython('len(range(5))')).toBe(5);
+    expect(await runPython('len(range(10, 0, -3))')).toBe(4);
+  });
+
+  test('len of an iterator raises like CPython', async () => {
+    await expect(runPython('len(zip([1], [2]))')).rejects.toThrow("object of type 'zip' has no len()");
   });
 });
 
@@ -2507,7 +2511,7 @@ datetime(2026, 13, 1)
     await expect(runPython(`
 from datetime import date
 date(2026, 2, 30)
-`)).rejects.toThrow('day is out of range for month');
+`)).rejects.toThrow('day 30 must be in range 1..28 for month 2 in year');
   });
 
   test('hour out of range', async () => {
@@ -2791,7 +2795,7 @@ date(2026, 1, 1) == datetime(2026, 1, 1)
     await expect(runPython(`
 from datetime import date, datetime
 date(2026, 1, 1) < datetime(2026, 1, 1)
-`)).rejects.toThrow("can't compare datetime.datetime to datetime.date");
+`)).rejects.toThrow("'<' not supported between instances of 'datetime.date' and 'datetime.datetime'");
   });
 
   test('sorted over datetimes', async () => {
@@ -4062,9 +4066,9 @@ result
 `)).toBe('caught');
   });
 
-  test('callable replacement raises a targeted error', async () => {
-    await expect(runPython(`import re\nre.sub(r"\\d", lambda m: "x", "123")`))
-      .rejects.toThrow('callable replacements are not supported');
+  test('callable replacement is called with each match', async () => {
+    expect(await runPython(`import re\nre.sub(r"\\d", lambda m: "x", "123")`)).toBe('xxx');
+    expect(await runPython(`import re\nre.sub(r"\\d+", lambda m: str(int(m.group()) * 2), "a1 b22")`)).toBe('a2 b44');
   });
 });
 
