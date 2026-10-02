@@ -403,14 +403,14 @@ const STR: MethodTable = Object.assign(Object.create(null), {
   rjust: (rt, s: string, args) => justify(rt, s, args, 'rjust', 'right'),
   center: (rt, s: string, args) => justify(rt, s, args, 'center', 'center'),
 
-  format: (_rt, s: string, args, kwargs) => strFormat(s, args, kwargs, getAttribute, getItem),
+  format: (_rt, s: string, args, kwargs) => strFormat(s, args, kwargs, getAttribute, (obj, key) => getItem(obj, key) as PyValue),
   format_map(_rt, s: string, args) {
     arity('format_map', args, 1);
     const mapping = args[0];
     if (!(mapping instanceof PyDict)) throw new TypeError('format_map() argument must be a dict');
     const kwargs = new Map<string, PyValue>();
     for (const [k, v] of mapping.map.values()) if (typeof k === 'string') kwargs.set(k, v);
-    return strFormat(s, [], kwargs, getAttribute, getItem);
+    return strFormat(s, [], kwargs, getAttribute, (obj, key) => getItem(obj, key) as PyValue);
   },
 
   partition(_rt, s: string, args) {
@@ -789,7 +789,11 @@ const SET: MethodTable = Object.assign(Object.create(null), {
 export function findMethod(obj: PyValue, name: string): Method | undefined {
   if (typeof obj === 'string') return STR[name];
   if (obj instanceof PyList) return LIST[name];
-  if (obj instanceof PyDict) return DICT[name];
+  if (obj instanceof PyDict) {
+    const extra = obj.extraMethods;
+    if (extra !== null && Object.hasOwn(extra, name)) return extra[name] as Method;
+    return DICT[name];
+  }
   if (obj instanceof PySet) return SET[name];
   if (obj instanceof PyTuple) return TUPLE[name];
   return undefined;
@@ -856,6 +860,10 @@ export function stopIteration(value: PyValue = null): InterpreterError {
 }
 
 export function getAttribute(obj: PyValue, name: string): PyValue {
+  if (obj instanceof PyTuple) {
+    const field = obj.getAttr(name);
+    if (field !== undefined) return field;
+  }
   const method = findMethod(obj, name);
   if (method !== undefined) {
     return new PyBuiltin(name, (rt, args, kwargs) => method(rt, obj, args, kwargs), true);
@@ -879,6 +887,7 @@ export function getAttribute(obj: PyValue, name: string): PyValue {
     value = generatorAttribute(obj, name);
   } else if (obj instanceof PyFunction || obj instanceof PyBuiltin) {
     if (name === '__name__') value = obj.name;
+    else if (obj instanceof PyBuiltin) value = obj.attrs?.get(name);
   } else if (obj instanceof PyFloat) {
     if (name === 'is_integer') value = new PyBuiltin(name, () => Number.isInteger(obj.v));
   } else if (isIntLike(obj)) {

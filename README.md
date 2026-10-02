@@ -108,13 +108,14 @@ A quick overview — see [`FEATURES.md`](./FEATURES.md) for the authoritative li
 - Generators with `yield`, `yield from` and `send()`. `map`, `filter`, `zip` and `enumerate` are lazy.
 - Exceptions are objects. `except ValueError as e` gives you `str(e)`, `e.args` and `type(e).__name__`, and the classes form CPython's hierarchy (`except LookupError` catches a `KeyError`).
 - The `datetime` module (`datetime`, `date`, `timedelta`, naive, with a host-configurable clock and session timezone), `math`, `statistics`, and `re` (backed by JS `RegExp`, dialect caveats in `FEATURES.md`).
+- Opt-in modules you register from the host: `json`, `itertools` and `collections` (`Counter`, `defaultdict`, `OrderedDict`, `deque`, `namedtuple`). See "Optional modules" below.
 - About 50 built-ins (`len`, `range`, `sum`, `sorted`, `enumerate`, `zip`, `map`, `filter`, `any`, `all`, `print`, `isinstance`, `getattr`, `format`, `round`, ...).
 
 ### Not supported
 
 | Feature | Reason |
 |---|---|
-| Modules other than `datetime`, `math`, `statistics`, `re` | **Safety.** There is no real module system — imports resolve against a built-in whitelist of pure-computation modules. Nothing importable touches the filesystem, network, or process. Everything else raises `ModuleNotFoundError`. |
+| Modules other than `datetime`, `math`, `statistics`, `re` and the registered optional ones | **Safety.** There is no real module system — imports resolve against a whitelist of pure-computation modules. Nothing importable touches the filesystem, network, or process. Everything else raises `ModuleNotFoundError`. |
 | `exec` / `eval` / `compile` | **Safety.** Dynamic code execution would bypass the sandbox. |
 | `open` / filesystem I/O | **Safety.** No filesystem access. Data comes in through tools. |
 | `__import__` / `globals` / `locals` | **Safety.** Introspection escapes could leak or mutate interpreter state. |
@@ -188,6 +189,29 @@ Long-lived interpreter. Options:
 - `limits: { maxStringLength?, maxCollectionSize? }` — allocation caps (defaults: 10,000,000 characters / elements). Exceeding one raises a Python-catchable `MemoryError` instead of OOMing the host. Pass `Infinity` to disable.
 - `now: () => number` — clock for `datetime.now()` / `date.today()`, in epoch milliseconds (default `Date.now`). A fractional value keeps its microseconds.
 - `timezone: string` — IANA timezone the sandboxed code appears to run in, e.g. `'Europe/Berlin'` (default `'UTC'`). Affects `datetime.now()`, `date.today()`, and how `fromisoformat()` localizes `Z`/offset-suffixed timestamps; pass the end user's timezone so dates render in their local time. All datetimes stay naive — see `FEATURES.md` for the full model.
+- `modules: PyModule[]` — optional modules to make importable; see "Optional modules" below.
+
+### Optional modules
+
+`json`, `itertools` and `collections` ship with the package but stay out of the core bundle. Import the ones you want and pass them in:
+
+```typescript
+import { createInterpreter } from "defanged";
+import { json } from "defanged/json";
+import { collections } from "defanged/collections";
+import { itertools } from "defanged/itertools";
+
+const interpreter = createInterpreter({ modules: [json, collections, itertools] });
+await interpreter.run(`
+import json
+from collections import Counter
+json.dumps(Counter("abracadabra").most_common(2))
+`); // '[["a", 5], ["b", 2]]'
+```
+
+Each one is pure computation, so the safety boundary does not move. `json` has `dumps` and `loads` (`load`/`dump` take files and do not exist). `itertools` has the lazy iterators (`chain`, `groupby`, `product`, `permutations`, `combinations`, `accumulate`, `islice`, `zip_longest`, `batched`, ...). `collections` has `Counter`, `defaultdict`, `OrderedDict`, `deque` and `namedtuple`. `FEATURES.md` lists what each supports.
+
+A module is a `PyModule` built from the value classes the package exports. That API exists so the three above can live outside the core; it is not yet documented or stable for third-party modules.
 
 ### `ToolDefinition`
 
@@ -261,7 +285,8 @@ source code ──► lexer ──► parser ──► compiler ──► VM ─
 - `src/values.ts`, `src/numbers.ts` — runtime values and exact-int / float arithmetic
 - `src/ops.ts`, `src/format.ts` — operators, and the three string-formatting styles
 - `src/builtins.ts`, `src/methods.ts` — built-in functions and the methods of `str`/`list`/`dict`/`set`
-- `src/datetime.ts`, `src/math.ts`, `src/statistics.ts`, `src/re.ts` — the importable modules
+- `src/datetime.ts`, `src/math.ts`, `src/statistics.ts`, `src/re.ts` — the built-in modules
+- `src/json.ts`, `src/itertools.ts`, `src/collections.ts` — the optional modules, each its own entry point
 - `src/errors.ts` — the exception classes
 - `src/interpreter.ts` — the public `Interpreter`: options, tools, `run()`
 

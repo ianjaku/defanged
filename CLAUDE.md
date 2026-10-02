@@ -21,11 +21,13 @@ Supporting files: `src/tokens.ts` (token types), `src/ast.ts` (node types), `src
 
 How values look in TypeScript: `str`/`bool`/`None` are JS `string`/`boolean`/`null`, an `int` is a `number` (a `bigint` past 2^53), a `float` is a `PyFloat`, and containers are `PyList`/`PyTuple`/`PyDict`/`PySet`. A built-in is `(rt, args, kwargs) => value`; it returns a promise only if it had to wait (a tool call, or a callback that made one), and the VM pauses the script on it. Use `andThen()` from `values.ts` to chain on such a result without forcing the synchronous case through a promise.
 
+A built-in that calls back into Python (`rt.call`, `rt.next`, `rt.collect`) must return or chain on the result it gets, never drop it: a promise from `rt.call` means the VM is paused inside that call, and abandoning it leaves frames behind that resume into nothing.
+
 Top-level variables live in a `Globals` table owned by the interpreter: the compiler gives each name a fixed slot and the VM reads it by index. An empty slot means the script has not defined the name, so the lookup falls back to built-ins and tools. Compiled code is therefore only valid for the interpreter it was compiled for.
 
 ## Non-negotiable rules
 
-1. **Never widen the safety boundary.** No `exec`, `eval`, `open`, `compile`, `__import__`, filesystem, network, or subprocess. These features don't exist and shouldn't be added. `import` resolves only against the built-in whitelist of pure-computation modules (currently `datetime`, `math`, `statistics`, `re`); never whitelist a module that performs I/O. If data needs to come in from the outside, it goes through `ToolDefinition`.
+1. **Never widen the safety boundary.** No `exec`, `eval`, `open`, `compile`, `__import__`, filesystem, network, or subprocess. These features don't exist and shouldn't be added. `import` resolves only against the built-in whitelist of pure-computation modules (`datetime`, `math`, `statistics`, `re`) plus the optional ones a host registers (`json`, `itertools`, `collections`, each its own entry point under `src/`); never add a module that performs I/O. If data needs to come in from the outside, it goes through `ToolDefinition`.
 2. **Tests are the spec.** `tests/features.test.ts` documents behavioral expectations. Before changing semantics, add or update a test that pins the new behavior.
 3. **Match CPython.** Don't invent Python. If unsure, verify in `python3.14 -c "..."`. Better: add a program to `tests/conformance/cases.ts` and run `PYTHON=python3.14 bun run conformance:record`, which saves CPython's output for `bun test` to compare against. A new feature or bug fix should come with a conformance case.
 4. **Always use Bun** instead of npm

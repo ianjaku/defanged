@@ -76,6 +76,9 @@ export interface InterpreterOptions extends BuiltinCallbacks {
   now?: () => number;
   /** IANA timezone (e.g. 'Europe/Berlin') the sandboxed code appears to run in. Defaults to 'UTC'. */
   timezone?: string;
+  /** Extra importable modules, such as `json` from "defanged/json". Each
+   *  must be pure computation: this is the only way to widen `import`. */
+  modules?: PyModule[];
 }
 
 export class Interpreter {
@@ -111,6 +114,10 @@ export class Interpreter {
       ['statistics', statisticsModule],
       ['re', reModule],
     ]);
+    for (const module of options.modules ?? []) {
+      if (modules.has(module.name)) throw new Error(`Module '${module.name}' is already provided by defanged`);
+      modules.set(module.name, module);
+    }
 
     this.host = {
       globals: new Globals(),

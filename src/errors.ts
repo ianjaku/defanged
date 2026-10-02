@@ -30,8 +30,9 @@ export class InterpreterError extends Error {
   }
 }
 
-/** Declares an exception class whose `name` and Python name are both `name`. */
-function define<B extends typeof InterpreterError>(name: string, Base: B) {
+/** Declares an exception class whose `name` and Python name are both `name`.
+ *  Modules use it for their own exceptions (`json.JSONDecodeError`). */
+export function defineException<B extends typeof InterpreterError>(name: string, Base: B) {
   const cls = class extends (Base as typeof InterpreterError) {
     static pyName = name;
     constructor(message: string = '', line: number = 0, column: number = 0) {
@@ -43,25 +44,25 @@ function define<B extends typeof InterpreterError>(name: string, Base: B) {
   return cls;
 }
 
-export const SyntaxError = define('SyntaxError', InterpreterError);
+export const SyntaxError = defineException('SyntaxError', InterpreterError);
 export type SyntaxError = InstanceType<typeof SyntaxError>;
 
-export const NameError = define('NameError', InterpreterError);
+export const NameError = defineException('NameError', InterpreterError);
 export type NameError = InstanceType<typeof NameError>;
 
-export const UnboundLocalError = define('UnboundLocalError', NameError);
+export const UnboundLocalError = defineException('UnboundLocalError', NameError);
 export type UnboundLocalError = InstanceType<typeof UnboundLocalError>;
 
-export const TypeError = define('TypeError', InterpreterError);
+export const TypeError = defineException('TypeError', InterpreterError);
 export type TypeError = InstanceType<typeof TypeError>;
 
-export const AttributeError = define('AttributeError', InterpreterError);
+export const AttributeError = defineException('AttributeError', InterpreterError);
 export type AttributeError = InstanceType<typeof AttributeError>;
 
-export const LookupError = define('LookupError', InterpreterError);
+export const LookupError = defineException('LookupError', InterpreterError);
 export type LookupError = InstanceType<typeof LookupError>;
 
-export const IndexError = define('IndexError', LookupError);
+export const IndexError = defineException('IndexError', LookupError);
 export type IndexError = InstanceType<typeof IndexError>;
 
 /** `str(e)` is the repr of the missing key, like CPython; the host-facing
@@ -74,13 +75,13 @@ export class KeyError extends LookupError {
   }
 }
 
-export const ValueError = define('ValueError', InterpreterError);
+export const ValueError = defineException('ValueError', InterpreterError);
 export type ValueError = InstanceType<typeof ValueError>;
 
-export const StatisticsError = define('StatisticsError', ValueError);
+export const StatisticsError = defineException('StatisticsError', ValueError);
 export type StatisticsError = InstanceType<typeof StatisticsError>;
 
-export const ArithmeticError = define('ArithmeticError', InterpreterError);
+export const ArithmeticError = defineException('ArithmeticError', InterpreterError);
 export type ArithmeticError = InstanceType<typeof ArithmeticError>;
 
 export class ZeroDivisionError extends ArithmeticError {
@@ -91,38 +92,38 @@ export class ZeroDivisionError extends ArithmeticError {
   }
 }
 
-export const OverflowError = define('OverflowError', ArithmeticError);
+export const OverflowError = defineException('OverflowError', ArithmeticError);
 export type OverflowError = InstanceType<typeof OverflowError>;
 
-export const AssertionError = define('AssertionError', InterpreterError);
+export const AssertionError = defineException('AssertionError', InterpreterError);
 export type AssertionError = InstanceType<typeof AssertionError>;
 
-export const StopIteration = define('StopIteration', InterpreterError);
+export const StopIteration = defineException('StopIteration', InterpreterError);
 export type StopIteration = InstanceType<typeof StopIteration>;
 
-export const ImportError = define('ImportError', InterpreterError);
+export const ImportError = defineException('ImportError', InterpreterError);
 export type ImportError = InstanceType<typeof ImportError>;
 
-export const ModuleNotFoundError = define('ModuleNotFoundError', ImportError);
+export const ModuleNotFoundError = defineException('ModuleNotFoundError', ImportError);
 export type ModuleNotFoundError = InstanceType<typeof ModuleNotFoundError>;
 
 /** Result of an operation would exceed the configured memory limits.
  *  Catchable from Python as MemoryError / Exception, like CPython. */
-export const MemoryError = define('MemoryError', InterpreterError);
+export const MemoryError = defineException('MemoryError', InterpreterError);
 export type MemoryError = InstanceType<typeof MemoryError>;
 
-export const RuntimeError = define('RuntimeError', InterpreterError);
+export const RuntimeError = defineException('RuntimeError', InterpreterError);
 export type RuntimeError = InstanceType<typeof RuntimeError>;
 
-export const RecursionError = define('RecursionError', RuntimeError);
+export const RecursionError = defineException('RecursionError', RuntimeError);
 export type RecursionError = InstanceType<typeof RecursionError>;
 
-export const NotImplementedError = define('NotImplementedError', RuntimeError);
+export const NotImplementedError = defineException('NotImplementedError', RuntimeError);
 export type NotImplementedError = InstanceType<typeof NotImplementedError>;
 
 /** A JS tool handler threw. Catchable from Python as ToolError, RuntimeError,
  *  or Exception, so scripts can implement fallbacks. */
-export const ToolError = define('ToolError', RuntimeError);
+export const ToolError = defineException('ToolError', RuntimeError);
 export type ToolError = InstanceType<typeof ToolError>;
 
 /** Host resource bounds. Scripts cannot catch these, not even with a bare

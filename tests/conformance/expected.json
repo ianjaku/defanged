@@ -30,6 +30,14 @@
    "error": null,
    "stdout": "1 6 1\n7\n[2, 2, 2] [0, 1, 2]\nrebound\n[10, 11, 12]\n"
   },
+  "collections Counter and defaultdict": {
+   "error": null,
+   "stdout": "Counter({'a': 5, 'b': 2, 'r': 2, 'c': 1, 'd': 1}) [('a', 5), ('b', 2)] [('a', 5), ('b', 2), ('r', 2), ('c', 1), ('d', 1)] 0 False 5 11 ['a', 'a', 'a', 'a', 'a', 'b'] True Counter\nCounter({'a': 7, 'b': 3, 'r': 1, 'c': 1, 'd': 1, 'q': -1}) {'a': 7, 'b': 3, 'r': 1, 'c': 1, 'd': 1, 'q': -1} [('a', 7), ('b', 3), ('c', 1), ('d', 1), ('q', -1), ('r', 1)] 12\nCounter({1: 3, 2: 1, 3: 1}) Counter({'a': 2}) Counter({'a': 1, 'b': 1}) Counter({'a': 2, 'b': 2}) Counter() Counter({'x': 2, 'y': 0})\n[('the', 3)] Counter({3: 8}) 3 0 the\ndefaultdict(<class 'list'>, {'x': [1, 2], 'y': []}) {'x': [1, 2], 'y': []} 2 False None 0 defaultdict True\n[('and', 2), ('bat', 1), ('cat', 1), ('hat', 1), ('the', 3)] n/a defaultdict(<class 'set'>, {'a': {1}}) defaultdict(None, {'a': 1})\nKeyError 'k'\n1 {'a': {'b': 1}}\nOrderedDict({'c': 3}) ['b', 'c', 'a'] ('a', 1) ('b', 2) OrderedDict({'c': 3}) True\n"
+  },
+  "collections deque and namedtuple": {
+   "error": null,
+   "stdout": "deque([1, 2, 3]) 5 0 4 [0, 1, 2, 3, 4] True 4 0 deque([1, 2, 3])\ndeque([7, 8, -2, -1, 1, 2, 3]) 1 1\ndeque([-2, 8, 3, 2, 1, -1]) deque([]) deque(['a', 'b'], maxlen=5) deque([2, 3, 4], maxlen=3) 2 False [1, 2, 3]\n[0] 0.0\n[0, 1] 0.5\n[0, 1, 2] 1.0\n[1, 2, 3] 2.0\n[2, 3, 4] 3.0\npop from an empty deque\nPoint(x=1, y=2) 1 2 {'x': 1, 'y': 2} Point(x=1, y=5) True (1, 2) True Point ('x', 'y') Row(id=7, name='ada', total=0) 0 ('id', 'name', 'total') 2 2 [(1, 3), (2, 4)]\n[Point(x=1, y=9), Point(x=2, y=1)] key (1, 2, 3) [1, 3] Point(x=5, y=6)\nPoint.__new__() missing 1 required positional argument: 'y'\n'Point' object has no attribute 'z'\n"
+  },
   "conditionals and truthiness": {
    "error": null,
    "stdout": "FTFTFTFTFFTFTFFT\nTrue True False True True False True True False\ndefault None 2 0 0 b\ninline suite\nelif\nsecond statement\n"
@@ -177,6 +185,18 @@
   "ints are arbitrary precision": {
    "error": null,
    "stdout": "1267650600228229401496703205376\n1000000000000000001\n24691357802469135780\n6148914691236517205 616 -1180591620717411303424\n9007199254740994 27021597764222976\n1180591620717411303424 4 1034834473200\n15511210043330985984000000\n"
+  },
+  "itertools": {
+   "error": null,
+   "stdout": "[1, 2, 3, 'a', 'b'] [1, 2, 3] [5, 7, 9, 11] [2, 5, 8] ['a', 'b'] ['b', 'c', 'd', 'e', 'f']\n['x', 'x', 'x'] ['a', 'b', 'a', 'b', 'a'] [1, 3, 6, 10] [1, 2, 6] [100, 101, 103] []\n[('a', ['a', 'a']), ('b', ['b', 'b', 'b']), ('c', ['c']), ('a', ['a', 'a'])] [(1, 2), (0, 1), (1, 3)] ['a', 'b']\n{'a': [2], 'b': [1, 3]}\n[('a', 1), ('a', 2), ('b', 1), ('b', 2)] [(0, 0), (0, 1), (1, 0), (1, 1)] [()] []\n[(1, 2), (1, 3), (2, 1), (2, 3), (3, 1), (3, 2)] [('a', 'b'), ('b', 'a')] [] [('a', 'b'), ('a', 'c'), ('a', 'd'), ('b', 'c'), ('b', 'd'), ('c', 'd')] [] [()] [('a', 'a'), ('a', 'b'), ('b', 'b')]\n[(1, 'a'), (2, 'b'), (3, None)] [(1, 2), (0, 3)] [8, 9] [1, 2] [5, 1] [0, 2, 4] [0, '']\n[('a', 'b'), ('b', 'c'), ('c', 'd')] [('a', 'b', 'c'), ('d', 'e', 'f'), ('g',)] 5050 10 [None, None]\n[1, 2, 1, 2] [1] [(1, 1, 1), (2, 2, 2)]\n"
+  },
+  "json dumps": {
+   "error": null,
+   "stdout": "{\"name\": \"Ada\", \"n\": 3, \"f\": 2.5, \"whole\": 4.0, \"big\": 100000000000000000000, \"none\": null, \"ok\": true, \"list\": [1, \"two\", [3]], \"t\": [1, 2], \"nested\": {\"k\": {}}, \"e\": []}\n{\n  \"name\": \"Ada\",\n  \"n\": 3,\n  \"f\": 2.5,\n  \"whole\": 4.0,\n  \"big\": 100000000000000000000,\n  \"none\": null,\n  \"ok\": true,\n  \"list\": [\n    1,\n    \"two\",\n    [\n      3\n    ]\n  ],\n  \"t\": [\n    1,\n    2\n  ],\n  \"nested\": {\n    \"k\": {}\n  },\n  \"e\": []\n}\n{\n\t\"a\": [\n\t\t1,\n\t\t2\n\t],\n\t\"b\": 1\n}\n{\"a\":2,\"b\":1} [] {} \"q\\\"\\\\\\n\\t\\u0001\" 1e+100 -0.0\n\"caf\\u00e9 \\ud83d\\ude00\" \"caf\u00e9\" {\"1\": \"bool key\", \"2.5\": \"float key\", \"null\": \"none key\"}\nNaN Infinity [-Infinity]\n{\"d\": \"2026-01-02\"} {\"d\": {\"iso\": \"2026-01-02\"}}\nObject of type date is not JSON serializable\nkeys must be str, int, float, bool or None, not tuple\nCircular reference detected\n"
+  },
+  "json loads": {
+   "error": null,
+   "stdout": "{'n': 10000000000000000000001, 'f': 1.0, 'e': 1000.0, 'neg': -0.5, 's': '\u00e9\\n', 'l': [1, [2, {}]], 'b': [True, False, None], 'nan': nan, 'inf': -inf, 'dup': 2} int float float True ['n', 'f', 'e', 'neg', 's', 'l', 'b', 'nan', 'inf', 'dup']\n[] x 3 -2.5 True None {'round': ['trip', 1, 2.0, None]}\nJSONDecodeError Illegal trailing comma before end of object: line 1 column 8 (char 7)\nJSONDecodeError Expecting ',' delimiter: line 1 column 4 (char 3)\nJSONDecodeError Expecting property name enclosed in double quotes: line 1 column 2 (char 1)\nJSONDecodeError Expecting value: line 1 column 1 (char 0)\nJSONDecodeError Expecting value: line 1 column 1 (char 0)\nJSONDecodeError Expecting ':' delimiter: line 1 column 5 (char 4)\nJSONDecodeError Expecting ',' delimiter: line 1 column 6 (char 5)\nJSONDecodeError Unterminated string starting at: line 1 column 1 (char 0)\nJSONDecodeError Extra data: line 1 column 10 (char 9)\nJSONDecodeError Extra data: line 1 column 2 (char 1)\nJSONDecodeError Invalid \\escape: line 1 column 6 (char 5)\nJSONDecodeError Expecting value: line 1 column 1 (char 0)\nTrue\nthe JSON object must be str, bytes or bytearray, not int\n"
   },
   "keyword arguments of built-in types and functions": {
    "error": null,

@@ -13,7 +13,7 @@ import {
 } from './numbers';
 import { asIndex, binary } from './ops';
 import {
-  DONE, Done, ELLIPSIS, Kwargs, MA, NativeFn, PyBuiltin, PyDict, PyDictView, PyFunction, PyGenerator,
+  DONE, Done, ELLIPSIS, Kwargs, MA, NativeFn, PyBuiltin, PyDict, PyDictView, PyFunction, PyGenerator, PyObject,
   PyIterator, PyList, PyRange, PySet, PySlice, PyTimeDelta, PyTuple, PyType, PyValue, Runtime, SeqIterator,
   T_BOOL, T_DICT, T_FLOAT, T_INT, T_LIST, T_NONE, T_RANGE, T_SET, T_SLICE, T_STR, T_TUPLE, T_TYPE,
   dictGet, exceptionType, hashKey, identityOf, pyCompare, pyRepr, pySetFrom, pyStr, strChars, strLength,
@@ -384,7 +384,8 @@ export function createBuiltins(callbacks: BuiltinCallbacks = {}): Map<string, Py
   type(T_TUPLE, (rt, args) => {
     arity('tuple', args, 0, 1);
     if (args.length === 0) return new PyTuple([]);
-    if (args[0] instanceof PyTuple) return args[0];
+    // A plain tuple is returned as is; a namedtuple becomes a plain tuple.
+    if (args[0] instanceof PyTuple && args[0].constructor === PyTuple) return args[0];
     return andThen(rt.collect(args[0]), (items) => new PyTuple(items.slice()));
   });
   type(T_SET, (rt, args) => {
@@ -439,6 +440,10 @@ export function createBuiltins(callbacks: BuiltinCallbacks = {}): Map<string, Py
     if (v instanceof PyDict || v instanceof PySet) return v.map.size;
     if (v instanceof PyRange) return v.length;
     if (v instanceof PyDictView) return v.dict.map.size;
+    if (v instanceof PyObject) {
+      const n = v.length();
+      if (n !== undefined) return n;
+    }
     throw new TypeError(`object of type '${typeName(v)}' has no len()`);
   });
 

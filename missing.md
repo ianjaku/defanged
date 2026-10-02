@@ -22,7 +22,7 @@ The README's "Not supported" table gives the rationale for the deliberate gaps. 
 ## Not built yet
 
 - `complex` numbers. `(-8) ** 0.5` raises `ValueError` instead of returning a complex.
-- `frozenset`, `collections`, `itertools`, `json`, `functools`. Models reach for `json.dumps`, `Counter`, `defaultdict` and `itertools.groupby` often; these are the most useful next additions and all are pure computation.
+- `frozenset`, `functools`, `string`, `random` (needs a seedable generator to stay deterministic). `json`, `itertools` and `collections` exist as optional modules; `FEATURES.md` lists what they leave out.
 - `gen.throw()`, `send()` through `yield from`, and running `finally` blocks of a generator that is dropped or closed half-way.
 - `range()` with bounds beyond 2^53 (raises `OverflowError`).
 - `\N{NAME}` string escapes (a syntax error that says to use `\uXXXX`).

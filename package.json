@@ -11,7 +11,8 @@
     "llm",
     "claude",
     "code-execution",
-    "safe-eval"
+    "safe-eval",
+    "json"
   ],
   "homepage": "https://github.com/ianjaku/defanged#readme",
   "bugs": {
@@ -31,6 +32,18 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./json": {
+      "types": "./dist/json.d.ts",
+      "import": "./dist/json.js"
+    },
+    "./itertools": {
+      "types": "./dist/itertools.d.ts",
+      "import": "./dist/itertools.js"
+    },
+    "./collections": {
+      "types": "./dist/collections.d.ts",
+      "import": "./dist/collections.js"
     }
   },
   "files": [
@@ -43,7 +56,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --target node --format esm && tsc --emitDeclarationOnly --declaration --outDir dist",
+    "build": "bun build ./src/index.ts ./src/json.ts ./src/itertools.ts ./src/collections.ts --outdir ./dist --target node --format esm --splitting && tsc --emitDeclarationOnly --declaration --outDir dist",
     "test": "bun test",
     "test:features": "bun test tests/features.test.ts",
     "bench": "bun benchmarks/run.ts",

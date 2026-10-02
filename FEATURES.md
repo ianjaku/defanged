@@ -450,6 +450,34 @@ Backed by JavaScript `RegExp` — Python patterns are translated to the JS diale
 
 **Dialect caveats** (JS `RegExp` under the hood): `\d`/`\w`/`\s` are ASCII-only (CPython's default is Unicode-aware; this matches `re.ASCII` behavior, so the `ASCII` flag is a no-op); `$` does not match before a trailing newline like Python's does (use `\Z` semantics or `re.M`). Not supported, with targeted errors: `re.VERBOSE`/`(?x)`, scoped inline flags `(?i:…)` and conditional groups `(?(id)…)`. Invalid patterns raise `ValueError`; `re.error` is an alias for it, so `except re.error:` works.
 
+### Optional modules
+
+Three more modules ship with the package as separate entry points. A host passes them in with `createInterpreter({ modules: [json, itertools, collections] })`; without that, importing them raises `ModuleNotFoundError` like any other module.
+
+#### `json`
+
+| Feature | Does | TS analogue |
+|---|---|---|
+| `dumps(obj, indent=, sort_keys=, separators=, default=, ensure_ascii=)` | Serialize; keys may be str, int, float, bool or None; tuples become arrays | `JSON.stringify(obj, null, indent)` |
+| `loads(s)` | Parse; ints stay exact, `1.0` stays a float, `NaN`/`Infinity` accepted | `JSON.parse(s)` |
+| `JSONDecodeError` | Raised on bad input with CPython's message and position; subclasses `ValueError` | `SyntaxError` from `JSON.parse` |
+
+`ensure_ascii` defaults to True, so non-ASCII text is written as `\uXXXX` escapes, as in CPython. `default=` may be any callable, including one that calls a tool. Not included: `load`/`dump` (files), `object_hook`, `parse_float`, `cls=`.
+
+#### `itertools`
+
+`chain` and `chain.from_iterable`, `count`, `cycle`, `repeat`, `accumulate` (with `func=` and `initial=`), `islice`, `takewhile`, `dropwhile`, `filterfalse`, `groupby` (lazy, sharing one pass like CPython), `zip_longest`, `starmap`, `pairwise`, `batched`, `product` (with `repeat=`), `permutations`, `combinations`, `combinations_with_replacement`. All return lazy iterators. Not included: `tee`, `compress`.
+
+#### `collections`
+
+| Type | Supports |
+|---|---|
+| `Counter` | Construction from an iterable, mapping or keywords; `most_common`, `elements`, `total`, `update`, `subtract`, `copy`; `+ - & \|`; a missing key counts as 0. It is a `dict` |
+| `defaultdict` | Any callable factory, including one that calls a tool; `copy`. It is a `dict` |
+| `OrderedDict` | `move_to_end`, `popitem(last=)`, `copy`. Plain dicts keep order too; this exists for scripts that ask for it |
+| `deque` | `append`/`appendleft`, `pop`/`popleft`, `extend`/`extendleft`, `rotate`, `clear`, `count`, `index`, `remove`, `reverse`, `copy`, `maxlen`, indexing, `len`, iteration, `in` |
+| `namedtuple` | Field access, `_fields`, `_asdict`, `_replace`, `defaults=`; instances are tuples |
+
 ---
 
 ## ❌ Known Missing Features

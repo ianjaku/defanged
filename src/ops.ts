@@ -74,7 +74,9 @@ function badIndex(kind: string, index: PyValue): TypeError {
 
 // ── Subscripting ────────────────────────────────────────────────────────────
 
-export function getItem(obj: PyValue, index: PyValue): PyValue {
+/** `obj[index]`. With `rt`, a dict subclass may compute a missing value, which
+ *  can mean waiting on a tool; without it the lookup is always synchronous. */
+export function getItem(obj: PyValue, index: PyValue, rt?: Runtime): MA<PyValue> {
   if (obj instanceof PyList || obj instanceof PyTuple) {
     const items = obj.items;
     if (typeof index === 'number') {
@@ -88,12 +90,14 @@ export function getItem(obj: PyValue, index: PyValue): PyValue {
     }
     const i = asIndex(index);
     if (i === undefined) throw badIndex(obj instanceof PyList ? 'list' : 'tuple', index);
-    return getItem(obj, i);
+    return getItem(obj, i) as PyValue;
   }
   if (obj instanceof PyDict) {
     const value = dictGet(obj, index);
-    if (value === undefined) throw keyError(index);
-    return value;
+    if (value !== undefined) return value;
+    const supplied = rt ? obj.missing(rt, index) : undefined;
+    if (supplied === undefined) throw keyError(index);
+    return supplied;
   }
   if (typeof obj === 'string') {
     if (index instanceof PySlice) {
@@ -325,6 +329,14 @@ export function binary(rt: Runtime, op: BinOp, a: PyValue, b: PyValue): PyValue 
     return percentFormat(a, b);
   }
 
+  if (a instanceof PyDict) {
+    const r = a.binaryOp(BIN_SYMBOLS[op], b, false);
+    if (r !== undefined) return r;
+  }
+  if (b instanceof PyDict) {
+    const r = b.binaryOp(BIN_SYMBOLS[op], a, true);
+    if (r !== undefined) return r;
+  }
   const leftSet = asSet(a);
   if (leftSet) {
     const rightSet = asSet(b);
@@ -418,6 +430,10 @@ export function contains(rt: Runtime, container: PyValue, item: PyValue): MA<boo
     const { start, stop, step } = container;
     if (step > 0 ? n < start || n >= stop : n > start || n <= stop) return false;
     return (n - start) % step === 0;
+  }
+  if (container instanceof PyObject) {
+    const items = container.iterate();
+    if (items !== undefined) return items.some((v) => sameOrEqual(v, item));
   }
   if (container instanceof PyGenerator || container instanceof PyIterator) {
     let found = false;

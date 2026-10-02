@@ -24,6 +24,19 @@ export class PyTuple {
   /** Its dict/set key once computed; a tuple and its hashable items never change. */
   hash: HashKey | undefined = undefined;
   constructor(public readonly items: PyValue[]) {}
+
+  /** Subclasses such as namedtuple report their own type. */
+  get pyType(): PyType {
+    return T_TUPLE;
+  }
+  /** Subclasses may expose attributes; undefined means none by that name. */
+  getAttr(_name: string): PyValue | undefined {
+    return undefined;
+  }
+  /** How to print it; subclasses wrap the plain tuple text. */
+  reprWith(inner: string): string {
+    return inner;
+  }
 }
 
 /**
@@ -35,6 +48,28 @@ export type HashKey = string | number;
 export class PyDict {
   /** hash key → [original key, value] */
   map = new Map<HashKey, [PyValue, PyValue]>();
+
+  /** Subclasses such as Counter and defaultdict report their own type. */
+  get pyType(): PyType {
+    return T_DICT;
+  }
+  /** Methods a subclass adds on top of dict's; looked up before dict's own. */
+  get extraMethods(): Record<string, unknown> | null {
+    return null;
+  }
+  /** `d[key]` for a key that is absent; undefined means raise KeyError. May
+   *  return a promise when producing the value had to wait on a tool. */
+  missing(_rt: Runtime, _key: PyValue): MA<PyValue> | undefined {
+    return undefined;
+  }
+  /** A binary operator the subclass defines; undefined means not handled. */
+  binaryOp(_op: string, _other: PyValue, _reversed: boolean): PyValue | undefined {
+    return undefined;
+  }
+  /** How to print it; subclasses wrap the `{...}` text. */
+  reprWith(inner: string): string {
+    return inner;
+  }
 }
 
 export class PySet {
@@ -74,6 +109,9 @@ export type MA<T> = T | Promise<T>;
 export type NativeFn = (rt: Runtime, args: PyValue[], kwargs: Kwargs) => MA<PyValue>;
 
 export class PyBuiltin {
+  /** Attributes reachable as `fn.name`, such as `itertools.chain.from_iterable`. */
+  attrs: Map<string, PyValue> | null = null;
+
   constructor(
     public readonly name: string,
     public readonly fn: NativeFn,
@@ -175,6 +213,14 @@ export abstract class PyObject {
   }
   /** `obj[key]`; undefined means the object is not subscriptable. */
   getItem(_key: PyValue): PyValue | undefined {
+    return undefined;
+  }
+  /** `len(obj)`; undefined means it has no length. */
+  length(): number | undefined {
+    return undefined;
+  }
+  /** The items `for x in obj` visits; undefined means not iterable. */
+  iterate(): PyValue[] | undefined {
     return undefined;
   }
   repr(): string {
@@ -286,8 +332,8 @@ export function typeOf(v: PyValue): PyType {
   if (v === null) return T_NONE;
   if (v instanceof PyFloat) return T_FLOAT;
   if (v instanceof PyList) return T_LIST;
-  if (v instanceof PyTuple) return T_TUPLE;
-  if (v instanceof PyDict) return T_DICT;
+  if (v instanceof PyTuple) return v.pyType;
+  if (v instanceof PyDict) return v.pyType;
   if (v instanceof PySet) return T_SET;
   if (v instanceof PyFunction) return T_FUNCTION;
   if (v instanceof PyBuiltin) return T_BUILTIN;
@@ -324,6 +370,10 @@ export function truthy(v: PyValue): boolean {
   if (v instanceof PyList || v instanceof PyTuple) return v.items.length > 0;
   if (v instanceof PyDict || v instanceof PySet) return v.map.size > 0;
   if (v instanceof PyFloat) return v.v !== 0;
+  if (v instanceof PyObject) {
+    const n = v.length();
+    if (n !== undefined) return n > 0;
+  }
   if (v instanceof PyRange) return v.length > 0;
   if (v instanceof PyDictView) return v.dict.map.size > 0;
   if (v instanceof PyTimeDelta) return v.days !== 0 || v.seconds !== 0 || v.microseconds !== 0;
@@ -693,11 +743,11 @@ function reprOf(v: PyValue, seen: Set<object>): string {
     if (v instanceof PyList) {
       out = `[${joinRepr(v.items, seen)}]`;
     } else if (v instanceof PyTuple) {
-      out = v.items.length === 1 ? `(${reprOf(v.items[0], seen)},)` : `(${joinRepr(v.items, seen)})`;
+      out = v.reprWith(v.items.length === 1 ? `(${reprOf(v.items[0], seen)},)` : `(${joinRepr(v.items, seen)})`);
     } else if (v instanceof PyDict) {
       const parts: string[] = [];
       for (const [k, val] of v.map.values()) parts.push(`${reprOf(k, seen)}: ${reprOf(val, seen)}`);
-      out = `{${parts.join(', ')}}`;
+      out = v.reprWith(`{${parts.join(', ')}}`);
     } else {
       out = v.map.size === 0 ? 'set()' : `{${joinRepr(Array.from(v.map.values()), seen)}}`;
     }

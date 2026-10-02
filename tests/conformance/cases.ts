@@ -1042,6 +1042,136 @@ except ImportError as e:
 from math import nope
 `, { message: false }),
 
+  // ── Plugin modules ────────────────────────────────────────────────────────
+  c('json dumps', py`
+import json
+data = {"name": "Ada", "n": 3, "f": 2.5, "whole": 4.0, "big": 10 ** 20, "none": None, "ok": True, "list": [1, "two", [3]], "t": (1, 2), "nested": {"k": {}}, "e": []}
+print(json.dumps(data))
+print(json.dumps(data, indent=2))
+print(json.dumps({"b": 1, "a": [1, 2]}, indent="\t", sort_keys=True))
+print(json.dumps({"b": 1, "a": 2}, separators=(",", ":"), sort_keys=True), json.dumps([]), json.dumps({}), json.dumps("q\"\\\n\t\x01"), json.dumps(1e100), json.dumps(-0.0))
+print(json.dumps("caf\u00e9 \U0001F600"), json.dumps("caf\u00e9", ensure_ascii=False), json.dumps({1: "int key", 2.5: "float key", True: "bool key", None: "none key"}))
+print(json.dumps(float("nan")), json.dumps(float("inf")), json.dumps([float("-inf")]))
+from datetime import date
+print(json.dumps({"d": date(2026, 1, 2)}, default=str), json.dumps({"d": date(2026, 1, 2)}, default=lambda v: {"iso": v.isoformat()}))
+try:
+    json.dumps({"d": date(2026, 1, 2)})
+except TypeError as e:
+    print(e)
+try:
+    json.dumps({(1, 2): 3})
+except TypeError as e:
+    print(e)
+a = []
+a.append(a)
+try:
+    json.dumps(a)
+except ValueError as e:
+    print(e)
+`),
+  c('json loads', py`
+import json
+doc = '{"n": 10000000000000000000001, "f": 1.0, "e": 1e3, "neg": -0.5, "s": "\\u00e9\\n", "l": [1, [2, {}]], "b": [true, false, null], "nan": NaN, "inf": -Infinity, "dup": 1, "dup": 2}'
+d = json.loads(doc)
+print(d, type(d["n"]).__name__, type(d["f"]).__name__, type(d["e"]).__name__, d["s"] == "\u00e9\n", list(d))
+print(json.loads("  [ ]  "), json.loads('"x"'), json.loads("3"), json.loads("-2.50"), json.loads("true"), json.loads("null"), json.loads(json.dumps({"round": ["trip", 1, 2.0, None]})))
+for bad in ['{"a": 1,}', '[1 2]', '{a: 1}', "'single'", '', '{"a"}', '[1, 2', '"unterminated', '{"a": 1} extra', '01', '"bad \\x escape"', 'nul']:
+    try:
+        json.loads(bad)
+    except json.JSONDecodeError as e:
+        print(type(e).__name__, e)
+print(isinstance(json.JSONDecodeError("x", "y", 0), ValueError) if False else issubclass(json.JSONDecodeError, ValueError))
+try:
+    json.loads(5)
+except TypeError as e:
+    print(e)
+`),
+  c('itertools', py`
+import itertools as it
+from itertools import chain, islice, groupby, product, permutations, combinations, accumulate, zip_longest
+print(list(chain([1, 2], (3,), "ab")), list(chain.from_iterable([[1], [2, 3], []])), list(islice(it.count(5, 2), 4)), list(islice(it.count(), 2, 10, 3)), list(islice("abcdef", 2)), list(islice("abcdef", 1, None)))
+print(list(it.repeat("x", 3)), list(islice(it.cycle("ab"), 5)), list(accumulate([1, 2, 3, 4])), list(accumulate([1, 2, 3], lambda a, b: a * b)), list(accumulate([1, 2], initial=100)), list(accumulate([])))
+print([(k, list(g)) for k, g in groupby("aabbbcaa")], [(k, len(list(g))) for k, g in groupby([1, 1, 2, 3, 3, 3], key=lambda x: x % 2)], [k for k, g in groupby(sorted(["apple", "avocado", "banana"]), key=lambda w: w[0])])
+rows = [{"org": "b", "v": 1}, {"org": "a", "v": 2}, {"org": "b", "v": 3}]
+print({k: [r["v"] for r in g] for k, g in groupby(sorted(rows, key=lambda r: r["org"]), key=lambda r: r["org"])})
+print(list(product("ab", [1, 2])), list(product([0, 1], repeat=2)), list(product()), list(product([], [1])))
+print(list(permutations([1, 2, 3], 2)), list(permutations("ab")), list(permutations([1, 2], 3)), list(combinations("abcd", 2)), list(combinations([1, 2], 3)), list(combinations([1, 2], 0)), list(it.combinations_with_replacement("ab", 2)))
+print(list(zip_longest([1, 2, 3], "ab")), list(zip_longest([1], [2, 3], fillvalue=0)), list(it.starmap(pow, [(2, 3), (3, 2)])), list(it.takewhile(lambda x: x < 3, [1, 2, 5, 1])), list(it.dropwhile(lambda x: x < 3, [1, 2, 5, 1])), list(it.filterfalse(lambda x: x % 2, range(6))), list(it.filterfalse(None, [0, 1, "", "a"])))
+print(list(it.pairwise("abcd")), list(it.batched("abcdefg", 3)), sum(islice(it.count(1), 100)), next(it.count(10)), list(islice(it.repeat(None), 2)))
+def gen():
+    yield 1
+    yield 2
+print(list(chain(gen(), gen())), list(it.islice(gen(), 1)), list(zip_longest(gen(), gen(), gen())))
+`),
+  c('collections Counter and defaultdict', py`
+from collections import Counter, defaultdict, OrderedDict
+c = Counter("abracadabra")
+print(c, c.most_common(2), c.most_common(), c["z"], "z" in c, len(c), c.total(), sorted(c.elements())[:6], isinstance(c, dict), type(c).__name__)
+c.update("aab")
+c.subtract({"r": 1, "q": 1})
+print(c, dict(c), sorted(c.items()), sum(c.values()))
+print(Counter([1, 1, 2]) + Counter([1, 3]), Counter(a=3, b=1) - Counter(a=1, b=5), Counter("aab") & Counter("ab"), Counter("aab") | Counter("abb"), Counter(), Counter({"x": 2, "y": 0}))
+words = "the cat and the hat and the bat".split()
+print(Counter(words).most_common(1), Counter(len(w) for w in words), Counter(words)["the"], Counter(words)["dog"], max(Counter(words), key=Counter(words).get))
+d = defaultdict(list)
+d["x"].append(1)
+d["x"].append(2)
+d["y"]
+print(d, dict(d), len(d), "z" in d, d.get("z"), defaultdict(int)["missing"], type(d).__name__, isinstance(d, dict))
+counts = defaultdict(int)
+for w in words:
+    counts[w] += 1
+print(sorted(counts.items()), defaultdict(lambda: "n/a")["k"], defaultdict(set, {"a": {1}}), defaultdict(None, a=1))
+try:
+    defaultdict(None)["k"]
+except KeyError as e:
+    print("KeyError", e)
+nested = defaultdict(lambda: defaultdict(int))
+nested["a"]["b"] += 1
+print(nested["a"]["b"], {k: dict(v) for k, v in nested.items()})
+o = OrderedDict([("a", 1), ("b", 2)])
+o["c"] = 3
+o.move_to_end("a")
+print(o, list(o), o.popitem(), o.popitem(last=False), o, isinstance(o, dict))
+`),
+  c('collections deque and namedtuple', py`
+from collections import deque, namedtuple
+d = deque([1, 2, 3])
+d.append(4)
+d.appendleft(0)
+print(d, len(d), d[0], d[-1], list(d), 3 in d, d.pop(), d.popleft(), d)
+d.extend([7, 8])
+d.extendleft([-1, -2])
+d.rotate(2)
+print(d, d.count(7), d.index(8))
+d.rotate(-3)
+d.remove(7)
+d.reverse()
+print(d, deque(), deque("ab", maxlen=5), deque(range(5), maxlen=3), deque(maxlen=2).maxlen, bool(deque()), sorted(deque([3, 1, 2])))
+window = deque(maxlen=3)
+for i in range(5):
+    window.append(i)
+    print(list(window), sum(window) / len(window))
+try:
+    deque().pop()
+except IndexError as e:
+    print(e)
+Point = namedtuple("Point", ["x", "y"])
+Row = namedtuple("Row", "id name total", defaults=[0])
+p = Point(1, 2)
+r = Row(7, "ada")
+print(p, p.x, p[1], p._asdict(), p._replace(y=5), p == (1, 2), tuple(p), isinstance(p, tuple), type(p).__name__, Point._fields, r, r.total, Row._fields, len(p), max(p), list(zip(*[Point(1, 2), Point(3, 4)])))
+print(sorted([Point(2, 1), Point(1, 9)]), {p: "key"}[Point(1, 2)], p + (3,), [pt.x for pt in [Point(1, 2), Point(3, 4)]], Point(x=5, y=6))
+try:
+    Point(1)
+except TypeError as e:
+    print(e)
+try:
+    p.z
+except AttributeError as e:
+    print(e)
+`),
+
   // ── Whole programs ────────────────────────────────────────────────────────
   c('report script', py`
 from datetime import date

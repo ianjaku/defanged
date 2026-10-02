@@ -19,7 +19,7 @@ import { findMethod, getAttribute } from './methods';
 import { binary, compare, deleteItem, getItem, inplace, setItem, unary } from './ops';
 import {
   Cell, DONE, Done, Globals, HashIterator, Kwargs, MA, PyBuiltin, PyDict, PyDictView, PyFunction, PyGenerator,
-  PyIterator, PyList, PyModule, PyRange, PySet, PySlice, PyTuple, PyType, PyValue, RangeIterator,
+  PyIterator, PyList, PyModule, PyObject, PyRange, PySet, PySlice, PyTuple, PyType, PyValue, RangeIterator,
   Runtime, SeqIterator,
   copyDict, copySet, dictHas, dictKeys, dictSet, pyRepr, pySetFrom, pyStr, setAdd, strChars, truthy, typeName,
 } from './values';
@@ -174,6 +174,10 @@ export class VM implements Runtime {
     if (v instanceof PySet) return new HashIterator(v, Array.from(v.map.values()), 'set_iterator');
     if (v instanceof PyDictView) return new HashIterator(v.dict, v.toArray(), `dict_${v.kind.slice(0, -1)}iterator`);
     if (v instanceof PyGenerator || v instanceof PyIterator) return v;
+    if (v instanceof PyObject) {
+      const items = v.iterate();
+      if (items !== undefined) return new SeqIterator(items, `${v.typeName}_iterator`);
+    }
     throw new TypeError(`'${typeName(v)}' object is not iterable`);
   }
 
@@ -679,7 +683,9 @@ export class VM implements Runtime {
               if (typeof index === 'number' && obj instanceof PyList && index >= 0 && index < obj.items.length) {
                 stack[sp - 1] = obj.items[index];
               } else {
-                stack[sp - 1] = getItem(obj, index);
+                const r = getItem(obj, index, this);
+                if (r instanceof Promise) return this.wait(frame, pc, sp - 1, Await.PUSH, r);
+                stack[sp - 1] = r;
               }
               break;
             }
