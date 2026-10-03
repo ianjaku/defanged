@@ -596,7 +596,7 @@ export function createBuiltins(callbacks: BuiltinCallbacks = {}): Map<string, Py
 
   fn('print', (_rt, args, kwargs) => {
     if (!onPrint) {
-      throw new RuntimeError('print() is not available. Use print_table(data, title, columns) for tables or show_chart(type, data, title) for charts.');
+      throw new RuntimeError('print() is not available. Use print_table(data, columns, title=) for tables or print_chart(type, data, x, y, title=) for charts.');
     }
     const sep = kwargs?.get('sep');
     const end = kwargs?.get('end');
