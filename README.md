@@ -266,9 +266,9 @@ createInterpreter({
       params: {
         report: { type: "dict", description: "{title, sections: [{name, rows}]}" },
         format: { type: "str", default: "pdf" },
-        notify: "bool?",
+        include_charts: "bool?",
       },
-      handler: ({ report, format, notify }) => render(report, format, notify),
+      handler: ({ report, format, include_charts }) => render(report, format, include_charts),
     },
   },
 });
