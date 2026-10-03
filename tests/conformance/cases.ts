@@ -1291,6 +1291,9 @@ print(random.uniform(1, 3), random.uniform(-1.5, 1.5), random.gauss(0, 1), rando
 for seed in [0, 1, -5, 2 ** 70, 123456789, True]:
     random.seed(seed)
     print(seed, random.random(), random.randint(1, 10 ** 12), random.randint(1, 2 ** 70))
+for seed in ["", "user-7", "a much longer seed string with spaces and unicode: é"]:
+    random.seed(seed)
+    print(repr(seed), random.random(), random.randint(1, 1000), random.Random(seed).random())
 random.seed(7)
 r = random.Random(7)
 print(r.random() == random.random(), r.randint(1, 6), random.randint(1, 6), type(r).__name__, isinstance(r, random.Random))

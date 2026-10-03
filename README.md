@@ -246,7 +246,7 @@ json.dumps(Counter("abracadabra").most_common(2))
 
 Each one is pure computation, so the safety boundary does not move. `json` has `dumps` and `loads` (`load`/`dump` take files and do not exist). `itertools` has the lazy iterators (`chain`, `groupby`, `product`, `permutations`, `combinations`, `accumulate`, `islice`, `zip_longest`, `batched`, ...). `collections` has `Counter`, `defaultdict`, `OrderedDict`, `deque` and `namedtuple`. `functools` has `reduce`, `partial`, `lru_cache`/`cache`, `cmp_to_key` and `wraps`. `string` has the character constants and `capwords`. `FEATURES.md` lists what each supports.
 
-`random` is a port of CPython's generator (Mersenne Twister), so `random.seed(42)` followed by `randint`, `shuffle`, `sample`, `gauss` or any other function gives the numbers CPython gives. Unseeded, each interpreter starts from OS entropy and keeps its own generator between runs, the way one Python process does. Only `int` seeds are accepted; CPython hashes `str` seeds with SHA-512, which is not ported.
+`random` is a port of CPython's generator (Mersenne Twister), so `random.seed(42)` followed by `randint`, `shuffle`, `sample`, `gauss` or any other function gives the numbers CPython gives. Unseeded, each interpreter starts from OS entropy and keeps its own generator between runs, the way one Python process does. `int` and `str` seeds both match CPython (`str` seeds hash through Web Crypto's SHA-512, so `seed()` with a string waits on the host like a tool call does); `float` seeds raise.
 
 A module is a `PyModule` built from the value classes the package exports. That API exists so the six above can live outside the core; it is not yet documented or stable for third-party modules.
 

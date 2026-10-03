@@ -502,7 +502,7 @@ A port of CPython's Mersenne Twister and its `_randbelow` rejection step, so eve
 
 | Feature | Does | TS analogue |
 |---|---|---|
-| `seed(a=None)` | `None` reseeds from OS entropy; an `int` of any size reseeds deterministically. `str`/`float` seeds raise `TypeError` | — |
+| `seed(a=None)` | `None` reseeds from OS entropy; an `int` of any size or a `str` reseeds deterministically, matching CPython. `float` seeds raise `TypeError` | — |
 | `random()`, `uniform(a, b)`, `triangular(low, high, mode)` | Floats | `Math.random()` |
 | `randint(a, b)`, `randrange(start, stop, step)`, `getrandbits(k)` | Exact ints of any size | — |
 | `choice(seq)`, `choices(population, weights=, cum_weights=, k=)`, `sample(population, k, counts=)`, `shuffle(list)` | On lists, tuples, strings and ranges; `shuffle` is in place on lists | — |

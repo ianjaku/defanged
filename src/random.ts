@@ -7,8 +7,9 @@
  * The generator is CPython's Mersenne Twister, ported step for step, so a
  * script that calls `random.seed(42)` gets the numbers CPython gives it.
  * Unseeded, each interpreter starts from OS entropy, and keeps its own state
- * between runs the way one Python process does. Seeds must be ints: CPython
- * hashes str seeds with SHA-512, which is not worth carrying here.
+ * between runs the way one Python process does. A str seed is hashed with
+ * SHA-512 through Web Crypto, as CPython does, so `seed("user-7")` gives the
+ * same sequence there. Float seeds need CPython's float hash and raise.
  *
  * `getstate`/`setstate` and `randbytes` are left out.
  */
@@ -150,6 +151,16 @@ class MersenneTwister {
   }
 }
 
+/** CPython seeds a str as `int.from_bytes(data + sha512(data))`, big-endian. */
+async function seedFromString(text: string): Promise<bigint> {
+  const data = new TextEncoder().encode(text);
+  const digest = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-512', data));
+  let n = 0n;
+  for (const byte of data) n = (n << 8n) | BigInt(byte);
+  for (const byte of digest) n = (n << 8n) | BigInt(byte);
+  return n;
+}
+
 // ── Argument helpers ────────────────────────────────────────────────────────
 
 function index(v: PyValue): PyInt {
@@ -221,10 +232,12 @@ function runningTotals(rt: Runtime, weights: PyValue): MA<PyValue[]> {
 // ── The module functions, bound to one generator ────────────────────────────
 
 function makeApi(gen: MersenneTwister): Map<string, PyValue> {
-  const seed = (a: PyValue | undefined): void => {
+  const seed = (a: PyValue | undefined): MA<null> => {
     if (a === undefined || a === null) gen.seedFromEntropy();
     else if (isIntLike(a)) gen.seedFromInt(BigInt(a));
-    else throw new TypeError(`The only supported seed types are None and int, not ${typeName(a)}`);
+    else if (typeof a === 'string') return seedFromString(a).then((n) => { gen.seedFromInt(n); return null; });
+    else throw new TypeError(`The only supported seed types are None, int and str, not ${typeName(a)}`);
+    return null;
   };
 
   const randrange = (name: string, args: PyValue[]): PyValue => {
@@ -253,8 +266,7 @@ function makeApi(gen: MersenneTwister): Map<string, PyValue> {
     fn('seed', (_rt, args, kwargs) => {
       atMost('seed', args, 2);
       rejectUnknown('seed', kwargs, ['a', 'version']);
-      seed(arg(args, kwargs, 0, 'a'));
-      return null;
+      return seed(arg(args, kwargs, 0, 'a'));
     }, true),
     fn('random', (_rt, args) => {
       atMost('random', args, 0);
@@ -482,8 +494,7 @@ T_RANDOM.construct = (_rt, args, kwargs) => {
   if (kwargs !== null && kwargs.size > 0) throw new TypeError('Random() takes no keyword arguments');
   const gen = new MersenneTwister();
   const api = makeApi(gen);
-  (api.get('seed') as PyBuiltin).fn(_rt, args, null);
-  return new PyRandom(api);
+  return andThen((api.get('seed') as PyBuiltin).fn(_rt, args, null), () => new PyRandom(api));
 };
 
 /** A module with its own generator, seeded from OS entropy. */
