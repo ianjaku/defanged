@@ -296,9 +296,12 @@ function exactPow(a: number, n: number): number | undefined {
 
 function floatPow(a: number, b: number): number {
   if (a === 0 && b < 0) throw new ZeroDivisionError('zero to a negative power');
-  if (a < 0 && Number.isFinite(b) && !Number.isInteger(b)) {
+  // Only a finite negative base goes complex; (-inf) ** 2.5 is inf.
+  if (a < 0 && Number.isFinite(a) && Number.isFinite(b) && !Number.isInteger(b)) {
     throw new ValueError('negative number cannot be raised to a fractional power (complex numbers are not supported)');
   }
+  // C's pow(): 1 to anything is 1, and -1 to an infinity is 1; JS says NaN.
+  if (a === 1 || (a === -1 && !Number.isFinite(b) && !Number.isNaN(b))) return 1;
   let r: number | undefined;
   if (Number.isInteger(b) && b !== 0 && a !== 0 && Number.isFinite(a)) r = exactPow(a, b);
   if (r === undefined) r = Math.pow(a, b);

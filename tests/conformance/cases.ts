@@ -1197,6 +1197,16 @@ for bad in [lambda: pow(2, 2, 0), lambda: pow(2, -1, 4), lambda: pow(2.0, 2, 3),
     except (ValueError, TypeError) as e:
         print(type(e).__name__, e)
 `),
+  c('float power edge cases', py`
+inf, nan = float("inf"), float("nan")
+print((-inf) ** 2.5, (-inf) ** 0.5, (-inf) ** -0.5, (-inf) ** 3, (-inf) ** -3, nan ** 0.5, (-2.0) ** inf, (-0.5) ** inf, (-1.0) ** inf, (-2.0) ** -inf)
+print(1.0 ** nan, 1.0 ** inf, (-1.0) ** nan, nan ** 0.0, (-1.0) ** -inf, 0.0 ** nan, 2.0 ** -1075, 0.5 ** 1074, (0.1 + 0.2) ** 10, 1.0000001 ** 1000, 9.99 ** 60, 1.5 ** -60, (-2.0) ** -3, 10.0 ** -5)
+for bad in [lambda: 0.0 ** -1, lambda: 1e300 ** 2, lambda: 2.0 ** 1024]:
+    try:
+        print(bad())
+    except (ValueError, ZeroDivisionError, OverflowError) as e:
+        print(type(e).__name__, e)
+`),
   c('functools', py`
 import functools
 from functools import reduce, partial, lru_cache, cache, cmp_to_key, wraps
