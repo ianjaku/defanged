@@ -403,6 +403,14 @@ Three things keep that cheap, and they are worth knowing when you write tools:
 
 ---
 
+## What changed in 1.1
+
+- `run(code, { signal })` cancels a run with an `AbortSignal`, and `defanged/worker` runs the interpreter in a thread the host can kill (see "Tools" and the worker section under API).
+- Tools can validate arguments with any Standard Schema library (zod, valibot, arktype); a failure is a Python `TypeError` the model can read.
+- `frozenset`, `random.seed("text")`, `datetime.isoformat(sep, timespec)`, `int.is_integer`, `as_integer_ratio` on ints and floats.
+- Float `**` with an integer exponent is now exact and matches CPython digit for digit; a few dozen error messages now use CPython's wording. These came out of `bun run fuzz`, which diffs random programs against CPython and runs in CI.
+- A guide to writing your own modules: `docs/modules.md`.
+
 ## What changed in 1.0
 
 1.0 is a new interpreter under the same name. Since 0.3:
