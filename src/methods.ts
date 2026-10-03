@@ -8,7 +8,7 @@
 
 import { getDatetimeAttr } from './datetime';
 import {
-  AttributeError, IndexError, InterpreterError, KeyError, StopIteration, TypeError, ValueError,
+  AttributeError, IndexError, InterpreterError, KeyError, OverflowError, StopIteration, TypeError, ValueError,
 } from './errors';
 import { strFormat } from './format';
 import { PyFloat, bitLength, floatRatio, isIntLike } from './numbers';
@@ -297,6 +297,16 @@ function split(s: string, args: PyValue[], kwargs: Kwargs, name: string, fromRig
 
 const CASED = /\p{L}/u;
 
+/** Unicode titlecase, which JS lacks: ß becomes Ss and ǆ becomes ǅ, where
+ *  uppercase would give SS and Ǆ. */
+const TITLECASE: Record<string, string> = { 'ǆ': 'ǅ', 'Ǆ': 'ǅ', 'ǉ': 'ǈ', 'Ǉ': 'ǈ', 'ǌ': 'ǋ', 'Ǌ': 'ǋ', 'ǳ': 'ǲ', 'Ǳ': 'ǲ' };
+function titlecase(ch: string): string {
+  const special = TITLECASE[ch];
+  if (special !== undefined) return special;
+  const upper = ch.toUpperCase();
+  return upper.length > 1 ? upper[0] + upper.slice(1).toLowerCase() : upper;
+}
+
 /** A method that takes no arguments. */
 function nullary<T>(name: string, impl: (self: T) => PyValue): Method {
   return (_rt, self, args, kwargs) => {
@@ -446,14 +456,14 @@ const STR: MethodTable = Object.assign(Object.create(null), {
     let previousCased = false;
     for (const ch of s) {
       const cased = CASED.test(ch);
-      out += cased ? (previousCased ? ch.toLowerCase() : ch.toUpperCase()) : ch;
+      out += cased ? (previousCased ? ch.toLowerCase() : titlecase(ch)) : ch;
       previousCased = cased;
     }
     return out;
   },
   capitalize(_rt, s: string) {
     const chars = strChars(s);
-    return chars.length === 0 ? s : chars[0].toUpperCase() + chars.slice(1).join('').toLowerCase();
+    return chars.length === 0 ? s : titlecase(chars[0]) + chars.slice(1).join('').toLowerCase();
   },
   swapcase(_rt, s: string) {
     let out = '';
@@ -623,6 +633,7 @@ const LIST: MethodTable = Object.assign(Object.create(null), {
   pop(_rt, list: PyList, args) {
     arity('pop', args, 0, 1);
     const length = list.items.length;
+    if (typeof args[0] === 'bigint') throw new OverflowError('Python int too large to convert to C ssize_t');
     const n = args.length === 0 ? -1 : int('pop', args[0]);
     if (length === 0) throw new IndexError('pop from empty list');
     if (args.length === 0) return list.items.pop()!;
@@ -683,8 +694,12 @@ export function dictUpdate(rt: Runtime, dict: PyDict, source: PyValue | undefine
   }
   return andThen(rt.collect(source), (pairs) => {
     pairs.forEach((pair, i) => {
+      // Any iterable will do as a pair: a dict contributes its keys, a set its members.
       const items = pair instanceof PyTuple || pair instanceof PyList ? pair.items
-        : typeof pair === 'string' ? strChars(pair) : undefined;
+        : typeof pair === 'string' ? strChars(pair)
+        : pair instanceof PyDict ? Array.from(pair.map.values(), (e) => e[0])
+        : pair instanceof PySet ? Array.from(pair.map.values())
+        : undefined;
       if (items === undefined) {
         throw new TypeError('object is not iterable');
       }
@@ -726,7 +741,7 @@ const DICT: MethodTable = Object.assign(Object.create(null), {
     arity('popitem', args, 0);
     let last: [PyValue, PyValue] | undefined;
     for (const entry of dict.map.values()) last = entry;
-    if (!last) throw new KeyError("'popitem(): dictionary is empty'");
+    if (!last) throw keyError('popitem(): dictionary is empty');
     dictDelete(dict, last[0]);
     return new PyTuple([last[0], last[1]]);
   },

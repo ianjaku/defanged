@@ -275,9 +275,14 @@ function percentChar(v: PyValue): string {
   return String.fromCodePoint(Number(n));
 }
 
-function checkStray(format: string, from: number, to: number): void {
+function checkStray(format: string, from: number, to: number, mapping: boolean): void {
   const at = format.indexOf('%', from);
   if (at < 0 || at >= to) return;
+  // `%(` opens a key: CPython wants the mapping first, then the closing paren.
+  if (format[at + 1] === '(' && format.indexOf(')', at) < 0) {
+    if (!mapping) throw new TypeError('format requires a mapping');
+    throw new ValueError('incomplete format key');
+  }
   // Skip the flags, width and precision to name the character that is wrong.
   const m = /^%(?:\([^)]*\))?[-+ 0#]*(?:\*|\d+)?(?:\.(?:\*|\d+))?/.exec(format.slice(at))!;
   const bad = format[at + m[0].length];
@@ -308,10 +313,10 @@ export function percentFormat(format: string, values: PyValue): string {
   // A '%' outside the conversions the pattern reads is an error, not text.
   let last = 0;
   for (const m of format.matchAll(re)) {
-    checkStray(format, last, m.index);
+    checkStray(format, last, m.index, mapping);
     last = m.index + m[0].length;
   }
-  checkStray(format, last, format.length);
+  checkStray(format, last, format.length, mapping);
   const out = format.replace(re, (_match, key: string | undefined, flags: string, width: string | undefined, precision: string | undefined, code: string) => {
     if (code === '%') return '%';
     const s: Spec = {

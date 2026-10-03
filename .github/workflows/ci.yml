@@ -43,4 +43,7 @@ jobs:
           PYTHON=python3 bun run conformance:record
           git diff --exit-code -I '"python": ' tests/conformance/expected.json
       - name: Random programs against CPython
-        run: PYTHON=python3 bun run fuzz --count 400 --seed ${{ github.run_number }}
+        # Fixed seeds on push, so a green run stays green; the weekly run explores a new seed.
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then PYTHON=python3 bun run fuzz --count 400 --seed ${{ github.run_number }};
+          else PYTHON=python3 bun run fuzz --count 300 --seed 101 && PYTHON=python3 bun run fuzz --count 300 --seed 102; fi
