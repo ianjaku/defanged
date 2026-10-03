@@ -89,6 +89,8 @@ export class Generator {
         // Parenthesized: `2 ** 31 ** 10` would be 2 to the 31**10, which CPython tries to build.
         if (op === '**' || op === '<<') return `((${sub()}) ${op} ${r.pick(['0', '1', '2', '3', '-1', '0.5', '10', '2.5', 'True', '-2'])})`;
         // A sequence times a huge int would make CPython allocate it for real.
+        // `is` on anything but a singleton depends on CPython's constant folding.
+        if (op === 'is' || op === 'is not') return `(${sub()} ${op} ${r.pick(['None', 'True', 'False'])})`;
         if (op === '*') {
           const right = r.pick(['0', '1', '2', '3', '-1', '0.5', '2.5', 'True', 'None', '"ab"', '[1]', '7']);
           const left = right === '"ab"' || right === '[1]' ? r.pick(['3', '-1', '0', '2.5', 'True', 'None', '"x"', '[0]', '(1,)']) : sub();

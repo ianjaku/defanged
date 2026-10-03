@@ -63,6 +63,8 @@ function knownDeviation(want: string, got: string): boolean {
   if (/^None$/.test(w) && !/Error/.test(g)) return true;
   // Float overflow carries libc's wording, which differs between macOS and Linux.
   if (/^OverflowError \(34, /.test(w) && /^OverflowError \(34, /.test(g)) return true;
+  // No typing generics (list[int]), and `is` on equal constants depends on CPython's constant folding.
+  if (/GenericAlias/.test(w)) return true;
   // No complex numbers.
   if (/\dj\)$/.test(w) || /complex/.test(w)) return true;
   // No bytes type: str(x, encoding) and friends.

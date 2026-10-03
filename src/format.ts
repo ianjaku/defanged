@@ -7,7 +7,7 @@ import { formatDatetime } from './datetime';
 import { IndexError, MemoryError, OverflowError, TypeError, ValueError } from './errors';
 import { PyFloat, PyInt, floatRepr, floatToInt, isIntLike, toFixedPy, toFloat } from './numbers';
 import {
-  PyDate, PyDateTime, PyDict, PyList, PyTuple, PyValue,
+  PyDate, PyDateTime, PyDict, PyList, PyRange, PyTuple, PyValue,
   dictGet, keyError, pyRepr, pyStr, strLength, typeName,
 } from './values';
 
@@ -290,7 +290,7 @@ function checkStray(format: string, from: number, to: number): void {
 export function percentFormat(format: string, values: PyValue): string {
   const positional = values instanceof PyTuple ? values.items : [values];
   // Anything subscriptable but a tuple or str counts as a mapping, so `'a' % []` is 'a'.
-  const mapping = values instanceof PyDict || values instanceof PyList;
+  const mapping = values instanceof PyDict || values instanceof PyList || values instanceof PyRange;
   let next = 0;
   let usedMapping = false;
   const re = /%(?:\(([^)]*)\))?([-+ 0#]*)(\*|\d+)?(?:\.(\*|\d+))?([a-zA-Z%])/g;
@@ -330,7 +330,7 @@ export function percentFormat(format: string, values: PyValue): string {
     if (key !== undefined) {
       if (!mapping) throw new TypeError('format requires a mapping');
       usedMapping = true;
-      if (values instanceof PyList) throw new TypeError('list indices must be integers or slices, not str');
+      if (!(values instanceof PyDict)) throw new TypeError(`${typeName(values)} indices must be integers or slices, not str`);
       const found = dictGet(values as PyDict, key);
       if (found === undefined) throw keyError(key);
       value = found;
