@@ -1,0 +1,8 @@
+# The playground as a Cloudflare Worker that serves only static assets.
+#   bun run playground:deploy
+name = "defanged"
+compatibility_date = "2026-10-01"
+
+[assets]
+directory = "./dist"
+not_found_handling = "404-page"

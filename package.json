@@ -80,7 +80,7 @@
     "prepublishOnly": "bun run build",
     "fuzz": "bun tests/fuzz/run.ts",
     "playground:build": "bun playground/build.ts",
-    "playground:deploy": "bun playground/build.ts && wrangler pages deploy playground/dist --project-name defanged",
+    "playground:deploy": "bun playground/build.ts && cd playground && wrangler deploy",
     "conformance:record": "bun tests/conformance/record.ts"
   },
   "devDependencies": {

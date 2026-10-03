@@ -12,6 +12,8 @@ import { runPython } from "defanged";
 await runPython(`sum(x * x for x in range(10))`); // 285
 ```
 
+**Try it:** [defanged.invacto.workers.dev](https://defanged.invacto.workers.dev) runs the interpreter in your browser with sample tools, charts and the prompt the model would see.
+
 [![CI](https://github.com/ianjaku/defanged/actions/workflows/ci.yml/badge.svg)](https://github.com/ianjaku/defanged/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/defanged.svg)](https://www.npmjs.com/package/defanged)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -382,6 +384,7 @@ source code ──► lexer ──► parser ──► compiler ──► VM ─
 - `src/errors.ts` — the exception classes
 - `src/tools.ts` — the `tools` option: forms, argument resolution, prompt signatures
 - `src/worker.ts`, `src/worker-thread.ts` — `defanged/worker`: the interpreter in a thread, tools proxied to the host
+- `playground/` — the browser playground (`bun run playground:build`, `bun run playground:deploy`)
 - `src/interpreter.ts` — the public `Interpreter`: options, tools, `run()`
 
 A Python call pushes a frame on the VM's own stack instead of recursing in JS. That is what lets a tool call pause the whole script on a promise from anywhere (inside a comprehension, a generator, a `sorted` key function), and what turns runaway recursion into a `RecursionError` instead of a crashed host. The one place JS does nest is a built-in calling back into Python, and the VM caps that at 100 levels.
