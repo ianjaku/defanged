@@ -245,12 +245,62 @@ function floatDivmod(a: number, b: number): [number, number] {
   return [floor, mod];
 }
 
+/** A finite nonzero double as m * 2^e with an integer m, exactly. */
+function decompose(x: number): [bigint, number] {
+  const view = new DataView(new ArrayBuffer(8));
+  view.setFloat64(0, Math.abs(x));
+  const bits = view.getBigUint64(0);
+  const exponentBits = Number((bits >> 52n) & 0x7ffn);
+  let m = bits & 0xfffffffffffffn;
+  let e = -1074;
+  if (exponentBits !== 0) {
+    m |= 1n << 52n;
+    e = exponentBits - 1075;
+  }
+  while (m % 2n === 0n) {
+    m >>= 1n;
+    e++;
+  }
+  return [m, e];
+}
+
+/** `a ** n` for an integer n, computed exactly as a fraction and rounded
+ *  once. JS Math.pow is off by an ulp for inputs like (0.1 + 0.2) ** 10;
+ *  CPython's result is the correctly rounded one. */
+function exactPow(a: number, n: number): number | undefined {
+  const [m, e] = decompose(a);
+  const k = Math.abs(n);
+  // Past this the fraction gets big; Math.pow's error is tolerable there.
+  if (k > 2048 || (bitLength(m) * k + Math.abs(e * k)) > 200_000) return undefined;
+  const mk = m ** BigInt(k);
+  const shift = e * k;
+  let num: bigint;
+  let den: bigint;
+  if (n >= 0) {
+    num = shift >= 0 ? mk << BigInt(shift) : mk;
+    den = shift >= 0 ? 1n : 1n << BigInt(-shift);
+  } else {
+    num = shift <= 0 ? 1n << BigInt(-shift) : 1n;
+    den = shift <= 0 ? mk : mk << BigInt(shift);
+  }
+  let r: number;
+  try {
+    r = intTrueDiv(num, den);
+  } catch (error) {
+    if (error instanceof OverflowError) return Infinity;
+    throw error;
+  }
+  return a < 0 && k % 2 === 1 ? -r : r;
+}
+
 function floatPow(a: number, b: number): number {
   if (a === 0 && b < 0) throw new ZeroDivisionError('zero to a negative power');
   if (a < 0 && Number.isFinite(b) && !Number.isInteger(b)) {
     throw new ValueError('negative number cannot be raised to a fractional power (complex numbers are not supported)');
   }
-  const r = Math.pow(a, b);
+  let r: number | undefined;
+  if (Number.isInteger(b) && b !== 0 && a !== 0 && Number.isFinite(a)) r = exactPow(a, b);
+  if (r === undefined) r = Math.pow(a, b);
   if (!Number.isFinite(r) && Number.isFinite(a) && Number.isFinite(b)) {
     throw new OverflowError("(34, 'Result too large')");
   }
@@ -328,6 +378,17 @@ export function numEquals(a: PyNum, b: PyNum): boolean {
 }
 
 // ── Conversions ─────────────────────────────────────────────────────────────
+
+/** The exact fraction a double stands for, in lowest terms: `float.as_integer_ratio()`. */
+export function floatRatio(x: number): [PyInt, PyInt] {
+  if (Number.isNaN(x)) throw new ValueError('cannot convert NaN to integer ratio');
+  if (!Number.isFinite(x)) throw new OverflowError('cannot convert Infinity to integer ratio');
+  if (x === 0) return [0, 1];
+  const [m, e] = decompose(x);
+  const num = e >= 0 ? m << BigInt(e) : m;
+  const den = e >= 0 ? 1n : 1n << BigInt(-e);
+  return [normBig(x < 0 ? -num : num), normBig(den)];
+}
 
 /** float → int, truncating toward zero. */
 export function floatToInt(x: number): PyInt {

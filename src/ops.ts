@@ -9,7 +9,7 @@ import { IndexError, OverflowError, TypeError, ValueError } from './errors';
 import { percentFormat } from './format';
 import { PyFloat, intInvert, intNeg, isIntLike, isNum, numBinary } from './numbers';
 import {
-  MA, OrderOp, PyDict, PyDictView, PyFrozenSet, PyGenerator, PyIterator, PyList, PyObject, PyRange, PySet,
+  MA, OrderOp, PyDict, PyDictView, PyFrozenSet, PyGenerator, PyIterator, PyList, PyObject, PyRange, PySet, PyType,
   PySlice, PyTimeDelta, PyTuple, PyValue, Runtime,
   copyDict, dictDelete, dictGet, dictHas, dictSet, isAstral, keyError, orderResult, pyCompare, pyEquals, pyIs,
   pySetFrom, sameOrEqual, setHas, strChars, andThen, typeName,
@@ -135,6 +135,7 @@ export function getItem(obj: PyValue, index: PyValue, rt?: Runtime): MA<PyValue>
     const value = obj.getItem(index);
     if (value !== undefined) return value;
   }
+  if (obj instanceof PyType) throw new TypeError(`type '${obj.name}' is not subscriptable`);
   throw new TypeError(`'${typeName(obj)}' object is not subscriptable`);
 }
 
@@ -325,6 +326,9 @@ export function binary(rt: Runtime, op: BinOp, a: PyValue, b: PyValue): PyValue 
     if (b instanceof PyTuple && isIntLike(a)) return new PyTuple(repeatItems(rt, b.items, a));
     if (typeof a === 'string' || a instanceof PyList || a instanceof PyTuple) {
       throw new TypeError(`can't multiply sequence by non-int of type '${typeName(b)}'`);
+    }
+    if (typeof b === 'string' || b instanceof PyList || b instanceof PyTuple) {
+      throw new TypeError(`can't multiply sequence by non-int of type '${typeName(a)}'`);
     }
   } else if (op === BinOp.MOD && typeof a === 'string') {
     return percentFormat(a, b);

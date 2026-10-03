@@ -48,9 +48,19 @@ export interface BuiltinCallbacks {
 
 // ── Argument helpers ────────────────────────────────────────────────────────
 
-/** The container constructors word their arity error without parentheses. */
+/** CPython's wording for built-ins that take positional arguments only:
+ *  `range expected at least 1 argument, got 0`. */
+function expected(name: string, args: PyValue[], min: number, max: number = min): void {
+  const n = args.length;
+  if (n >= min && n <= max) return;
+  const s = (k: number) => (k === 1 ? '' : 's');
+  if (min === max) throw new TypeError(`${name} expected ${min} argument${s(min)}, got ${n}`);
+  if (n < min) throw new TypeError(`${name} expected at least ${min} argument${s(min)}, got ${n}`);
+  throw new TypeError(`${name} expected at most ${max} argument${s(max)}, got ${n}`);
+}
+
 function atMostOne(name: string, args: PyValue[]): void {
-  if (args.length > 1) throw new TypeError(`${name} expected at most 1 argument, got ${args.length}`);
+  expected(name, args, 0, 1);
 }
 
 function onlyKeywords(name: string, kwargs: Kwargs, allowed: string[]): void {
@@ -162,14 +172,14 @@ class FilterIterator extends PyIterator {
 // ── Numbers ─────────────────────────────────────────────────────────────────
 
 function toInt(args: PyValue[], kwargs: Kwargs): PyValue {
-  arity('int', args, 0, 2);
+  expected('int', args, 0, 2);
   onlyKeywords('int', kwargs, ['base']);
   if (args.length === 0) return 0;
   const x = args[0];
   const baseArg = args.length > 1 ? args[1] : kwargs?.get('base');
   if (baseArg !== undefined) {
-    if (typeof x !== 'string') throw new TypeError("int() can't convert non-string with explicit base");
     const base = Number(integer(baseArg, ''));
+    if (typeof x !== 'string') throw new TypeError("int() can't convert non-string with explicit base");
     if (base !== 0 && (base < 2 || base > 36)) throw new ValueError('int() base must be >= 2 and <= 36, or 0');
     const parsed = parseIntString(x, base);
     if (parsed === undefined) throw new ValueError(`invalid literal for int() with base ${base}: ${pyRepr(x)}`);
@@ -186,7 +196,7 @@ function toInt(args: PyValue[], kwargs: Kwargs): PyValue {
 }
 
 function toFloatValue(args: PyValue[]): PyValue {
-  arity('float', args, 0, 1);
+  expected('float', args, 0, 1);
   if (args.length === 0) return new PyFloat(0);
   const x = args[0];
   if (typeof x === 'string') {
@@ -200,10 +210,11 @@ function toFloatValue(args: PyValue[]): PyValue {
 }
 
 function round(args: PyValue[], kwargs: Kwargs): PyValue {
-  arity('round', args, 0, 2);
+  if (args.length > 2) throw new TypeError(`round() takes at most 2 arguments (${args.length} given)`);
   onlyKeywords('round', kwargs, ['number', 'ndigits']);
   const x = args.length > 0 ? args[0] : kwargs?.get('number');
   if (x === undefined) throw new TypeError("round() missing required argument 'number' (pos 1)");
+  if (!isIntLike(x) && !(x instanceof PyFloat)) throw new TypeError(`type ${typeName(x)} doesn't define __round__ method`);
   const digitsArg = args.length > 1 ? args[1] : kwargs?.get('ndigits');
   const digits = digitsArg === undefined || digitsArg === null ? null : Number(integer(digitsArg, ''));
   if (isIntLike(x)) {
@@ -228,8 +239,11 @@ function round(args: PyValue[], kwargs: Kwargs): PyValue {
 
 /** sum(): floats use compensated (Neumaier) summation like CPython 3.12+. */
 function sum(rt: Runtime, args: PyValue[], kwargs: Kwargs): MA<PyValue> {
-  arity('sum', args, 1, 2);
+  if (args.length === 0) throw new TypeError('sum() takes at least 1 positional argument (0 given)');
+  if (args.length > 2) throw new TypeError(`sum() takes at most 2 arguments (${args.length} given)`);
   let total: PyValue = args.length > 1 ? args[1] : kwargs?.get('start') ?? 0;
+  // CPython asks for the iterator before it looks at `start`.
+  rt.iter(args[0]);
   if (typeof total === 'string') throw new TypeError("sum() can't sum strings [use ''.join(seq) instead]");
   let floating = false;
   let partial = 0;
@@ -387,11 +401,14 @@ export function createBuiltins(callbacks: BuiltinCallbacks = {}): Map<string, Py
   type(T_INT, (_rt, args, kwargs) => toInt(args, kwargs), true);
   type(T_FLOAT, (_rt, args) => toFloatValue(args));
   type(T_BOOL, (_rt, args) => {
-    arity('bool', args, 0, 1);
+    expected('bool', args, 0, 1);
     return args.length > 0 && truthy(args[0]);
   });
   type(T_STR, (_rt, args) => {
-    arity('str', args, 0, 1);
+    if (args.length > 1) {
+      if (typeof args[1] !== 'string') throw new TypeError(`str() argument 'encoding' must be str, not ${typeName(args[1])}`);
+      throw new TypeError(typeof args[0] === 'string' ? 'decoding str is not supported' : `decoding to str: need a bytes-like object, ${typeName(args[0])} found`);
+    }
     return args.length === 0 ? '' : pyStr(args[0]);
   });
   type(T_LIST, (rt, args) => {
@@ -427,7 +444,7 @@ export function createBuiltins(callbacks: BuiltinCallbacks = {}): Map<string, Py
     return andThen(dictUpdate(rt, dict, args[0], kwargs), () => dict);
   }, true);
   type(T_RANGE, (_rt, args) => {
-    arity('range', args, 1, 3);
+    expected('range', args, 1, 3);
     const nums = args.map((a) => {
       if (!isIntLike(a)) throw new TypeError(`'${typeName(a)}' object cannot be interpreted as an integer`);
       if (typeof a === 'bigint') throw new OverflowError('range() bounds beyond 2**53 are not supported in this sandbox');
@@ -444,7 +461,7 @@ export function createBuiltins(callbacks: BuiltinCallbacks = {}): Map<string, Py
     return new PySlice(args[0], args[1], args.length > 2 ? args[2] : null);
   });
   type(T_TYPE, (_rt, args) => {
-    if (args.length !== 1) throw new TypeError('type() takes 1 argument');
+    if (args.length !== 1) throw new TypeError('type() takes 1 or 3 arguments');
     return typeOf(args[0]);
   });
   TYPES_BY_NAME.set('NoneType', T_NONE);
@@ -494,13 +511,15 @@ export function createBuiltins(callbacks: BuiltinCallbacks = {}): Map<string, Py
   fn('round', (_rt, args, kwargs) => round(args, kwargs), true);
 
   fn('pow', (_rt, args, kwargs) => {
-    arity('pow', args, 2, 3);
+    if (args.length < 2) throw new TypeError(`pow() missing required argument '${args.length === 0 ? 'base' : 'exp'}' (pos ${args.length + 1})`);
+    if (args.length > 3) throw new TypeError(`pow() takes at most 3 arguments (${args.length} given)`);
     onlyKeywords('pow', kwargs, ['mod']);
     const [base, exp] = args;
     const mod = args.length > 2 ? args[2] : kwargs?.get('mod');
     if (mod !== undefined && mod !== null) {
       if (!isIntLike(base) || !isIntLike(exp) || !isIntLike(mod)) {
-        throw new TypeError('pow() 3rd argument not allowed unless all arguments are integers');
+        if (!isIntLike(mod) || (isNum(base) && isNum(exp))) throw new TypeError('pow() 3rd argument not allowed unless all arguments are integers');
+        throw new TypeError(`unsupported operand type(s) for ** or pow(): '${typeName(base)}', '${typeName(exp)}', '${typeName(mod)}'`);
       }
       return intPowMod(integer(base, ''), integer(exp, ''), integer(mod, ''));
     }
@@ -508,8 +527,10 @@ export function createBuiltins(callbacks: BuiltinCallbacks = {}): Map<string, Py
   }, true);
 
   fn('divmod', (rt, args) => {
-    arity('divmod', args, 2);
-    return new PyTuple([binary(rt, BinOp.FLOORDIV, args[0], args[1]), binary(rt, BinOp.MOD, args[0], args[1])]);
+    expected('divmod', args, 2);
+    const [a, b] = args;
+    if (!isNum(a) || !isNum(b)) throw new TypeError(`unsupported operand type(s) for divmod(): '${typeName(a)}' and '${typeName(b)}'`);
+    return new PyTuple([binary(rt, BinOp.FLOORDIV, a, b), binary(rt, BinOp.MOD, a, b)]);
   });
 
   fn('hex', prefixed('hex', '0x', 16));
@@ -533,7 +554,7 @@ export function createBuiltins(callbacks: BuiltinCallbacks = {}): Map<string, Py
   });
 
   fn('sorted', (rt, args, kwargs) => {
-    arity('sorted', args, 1);
+    expected('sorted', args, 1);
     onlyKeywords('sorted', kwargs, ['key', 'reverse']);
     const reverse = kwargs?.get('reverse');
     return andThen(rt.collect(args[0]), (items) =>
@@ -541,7 +562,7 @@ export function createBuiltins(callbacks: BuiltinCallbacks = {}): Map<string, Py
   }, true);
 
   fn('reversed', (rt, args) => {
-    arity('reversed', args, 1);
+    expected('reversed', args, 1);
     const v = args[0];
     let items: PyValue[];
     if (v instanceof PyList || v instanceof PyTuple) items = v.items.slice();
@@ -557,7 +578,8 @@ export function createBuiltins(callbacks: BuiltinCallbacks = {}): Map<string, Py
   });
 
   fn('enumerate', (rt, args, kwargs) => {
-    arity('enumerate', args, 1, 2);
+    if (args.length === 0) throw new TypeError("enumerate() missing required argument 'iterable'");
+    if (args.length > 2) throw new TypeError(`enumerate() takes at most 2 arguments (${args.length} given)`);
     onlyKeywords('enumerate', kwargs, ['start']);
     const start = args.length > 1 ? args[1] : kwargs?.get('start') ?? 0;
     return new EnumerateIterator(rt.iter(args[0]), integer(start, ''));
@@ -645,7 +667,7 @@ export function createBuiltins(callbacks: BuiltinCallbacks = {}): Map<string, Py
   });
 
   fn('isinstance', (_rt, args) => {
-    arity('isinstance', args, 2);
+    expected('isinstance', args, 2);
     return isInstance(args[0], args[1]);
   });
 

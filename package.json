@@ -78,6 +78,7 @@
     "bench": "bun benchmarks/run.ts",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "bun run build",
+    "fuzz": "bun tests/fuzz/run.ts",
     "conformance:record": "bun tests/conformance/record.ts"
   },
   "devDependencies": {

@@ -11,20 +11,29 @@ import {
   AttributeError, IndexError, InterpreterError, KeyError, StopIteration, TypeError, ValueError,
 } from './errors';
 import { strFormat } from './format';
-import { PyFloat, bitLength, isIntLike } from './numbers';
+import { PyFloat, bitLength, floatRatio, isIntLike } from './numbers';
 import { asIndex, getItem, objectOrder } from './ops';
 import {
   DONE, Kwargs, MA, PyBuiltin, PyDate, PyDateTime, PyDict, PyDictView, PyFrozenSet, PyFunction, PyGenerator, PyList,
   PyModule, PyObject, PySet, PyTimeDelta, PyTuple, PyType, PyValue, Runtime,
   T_DICT, T_FROZENSET, T_LIST, T_SET, T_STR, T_TUPLE,
   copyDict, copySet, dictDelete, dictGet, dictSet, hashKey, isAstral, isSubset, keyError, pySetFrom, sameOrEqual,
-  setAdd, sortCompare, strChars, strLength, andThen, typeName, typeOf,
+  pyCompare, setAdd, sortCompare, strChars, strLength, andThen, typeName, typeOf,
 } from './values';
 
 export type Method = (rt: Runtime, self: any, args: PyValue[], kwargs: Kwargs) => MA<PyValue>;
 type MethodTable = Record<string, Method>;
 
 // ── Argument helpers ────────────────────────────────────────────────────────
+
+/** The `METH_FASTCALL` wording: `pop expected at least 1 argument, got 0`. */
+function expectedArgs(name: string, args: PyValue[], min: number, max: number): void {
+  const n = args.length;
+  if (n >= min && n <= max) return;
+  const s = (k: number) => (k === 1 ? '' : 's');
+  if (n < min) throw new TypeError(`${name} expected at least ${min} argument${s(min)}, got ${n}`);
+  throw new TypeError(`${name} expected at most ${max} argument${s(max)}, got ${n}`);
+}
 
 export function arity(name: string, args: PyValue[], min: number, max: number = min): void {
   if (args.length >= min && args.length <= max) return;
@@ -37,14 +46,18 @@ export function arity(name: string, args: PyValue[], min: number, max: number = 
     : `${name}() takes at most ${max} argument${max === 1 ? '' : 's'} (${args.length} given)`);
 }
 
-function str(name: string, v: PyValue, position: string = 'argument'): string {
-  if (typeof v !== 'string') throw new TypeError(`${name}() ${position} must be str, not ${typeName(v)}`);
+/** `position` null gives CPython's bare form: `must be str, not int`. */
+function str(name: string, v: PyValue, position: string | null = 'argument'): string {
+  if (typeof v !== 'string') {
+    // CPython's two wordings also differ on None: 'NoneType' in one, 'None' in the other.
+    throw new TypeError(position === null ? `must be str, not ${typeName(v)}` : `${name}() ${position} must be str, not ${v === null ? 'None' : typeName(v)}`);
+  }
   return v;
 }
 
-function int(name: string, v: PyValue): number {
+function int(_name: string, v: PyValue): number {
   const n = asIndex(v);
-  if (n === undefined) throw new TypeError(`${name}(): '${typeName(v)}' object cannot be interpreted as an integer`);
+  if (n === undefined) throw new TypeError(`'${typeName(v)}' object cannot be interpreted as an integer`);
   return n;
 }
 
@@ -110,6 +123,23 @@ function mergeSort(indices: number[], cmp: (a: number, b: number) => MA<number>)
     }));
 }
 
+/** The error CPython's sort raises: it reads the (reversed, if asked) input
+ *  left to right and compares each item with the one before it, so the
+ *  message names the first adjacent pair that cannot be ordered. The JS
+ *  sort visits pairs in its own order, hence this second look. */
+function firstIncomparable(keys: PyValue[], reverse: boolean): TypeError | undefined {
+  const order = reverse ? keys.slice().reverse() : keys;
+  for (let i = 1; i < order.length; i++) {
+    try {
+      pyCompare('<', order[i], order[i - 1]);
+    } catch (e) {
+      if (e instanceof TypeError) return e;
+      throw e;
+    }
+  }
+  return undefined;
+}
+
 /** A new array with `items` in sorted order. Stable, like Python's sort:
  *  equal items keep their original order, also under `reverse`. */
 export function sortItems(rt: Runtime, items: PyValue[], key: PyValue | undefined, reverse: boolean): MA<PyValue[]> {
@@ -120,10 +150,15 @@ export function sortItems(rt: Runtime, items: PyValue[], key: PyValue | undefine
         andThen(objectOrder(rt, '<', keys[a], keys[b]), (c) => (reverse ? -c : c));
       return andThen(mergeSort(indices, cmp), (sorted) => sorted.map((i) => items[i]));
     }
-    indices.sort((a, b) => {
-      const c = sortCompare(keys[a], keys[b]);
-      return c !== 0 ? (reverse ? -c : c) : a - b;
-    });
+    try {
+      indices.sort((a, b) => {
+        const c = sortCompare(keys[a], keys[b]);
+        return c !== 0 ? (reverse ? -c : c) : a - b;
+      });
+    } catch (e) {
+      if (e instanceof TypeError) throw firstIncomparable(keys, reverse) ?? e;
+      throw e;
+    }
     return indices.map((i) => items[i]);
   };
   if (key === undefined || key === null) return order(items);
@@ -138,7 +173,8 @@ function stripChars(s: string, args: PyValue[], left: boolean, right: boolean, n
   if (chars === undefined || chars === null) {
     return left && right ? s.trim() : left ? s.trimStart() : s.trimEnd();
   }
-  const set = new Set(strChars(str(name, chars, 'arg')));
+  if (typeof chars !== 'string') throw new TypeError(`${name} arg must be None or str`);
+  const set = new Set(strChars(chars));
   const cs = strChars(s);
   let start = 0;
   let end = cs.length;
@@ -179,7 +215,7 @@ function cpIndex(s: string, unit: number): number {
 
 function find(s: string, args: PyValue[], name: string, reverse: boolean): number {
   arity(name, args, 1, 3);
-  const sub = str(name, args[0]);
+  const sub = str(name, args[0], 'argument 1');
   const [start, end] = range(s, args, 1, name);
   if (end - start < sub.length) return -1;
   const window = s.slice(start, end);
@@ -247,7 +283,8 @@ function split(s: string, args: PyValue[], kwargs: Kwargs, name: string, fromRig
     return new PyList([rest, ...tail]);
   }
 
-  const sep = str(name, sepArg, 'sep');
+  if (typeof sepArg !== 'string') throw new TypeError(`must be str or None, not ${typeName(sepArg)}`);
+  const sep = sepArg;
   if (sep === '') throw new ValueError('empty separator');
   const parts = s.split(sep);
   if (maxsplit < 0 || parts.length <= maxsplit + 1) return new PyList(parts);
@@ -344,7 +381,7 @@ const STR: MethodTable = Object.assign(Object.create(null), {
 
   count(_rt, s: string, args) {
     arity('count', args, 1, 3);
-    const sub = str('count', args[0]);
+    const sub = str('count', args[0], 'argument 1');
     const [start, end] = range(s, args, 1, 'count');
     const text = s.slice(start, end);
     if (sub === '') return strLength(text) + 1;
@@ -355,7 +392,14 @@ const STR: MethodTable = Object.assign(Object.create(null), {
 
   join(rt, sep: string, args) {
     arity('join', args, 1);
-    return andThen(rt.collect(args[0]), (items) => {
+    let collected: MA<PyValue[]>;
+    try {
+      collected = rt.collect(args[0]);
+    } catch (e) {
+      if (e instanceof TypeError && e.message.endsWith('is not iterable')) throw new TypeError('can only join an iterable');
+      throw e;
+    }
+    return andThen(collected, (items) => {
       let total = 0;
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
@@ -445,14 +489,14 @@ const STR: MethodTable = Object.assign(Object.create(null), {
 
   partition(_rt, s: string, args) {
     arity('partition', args, 1);
-    const sep = str('partition', args[0]);
+    const sep = str('partition', args[0], null);
     if (sep === '') throw new ValueError('empty separator');
     const at = s.indexOf(sep);
     return new PyTuple(at < 0 ? [s, '', ''] : [s.slice(0, at), sep, s.slice(at + sep.length)]);
   },
   rpartition(_rt, s: string, args) {
     arity('rpartition', args, 1);
-    const sep = str('rpartition', args[0]);
+    const sep = str('rpartition', args[0], null);
     if (sep === '') throw new ValueError('empty separator');
     const at = s.lastIndexOf(sep);
     return new PyTuple(at < 0 ? ['', '', s] : [s.slice(0, at), sep, s.slice(at + sep.length)]);
@@ -534,7 +578,7 @@ function maketrans(_rt: Runtime, args: PyValue[]): PyValue {
 // ── list ────────────────────────────────────────────────────────────────────
 
 function indexOf(items: PyValue[], args: PyValue[], name: string): number {
-  arity('index', args, 1, 3);
+  expectedArgs('index', args, 1, 3);
   const length = items.length;
   const clamp = (v: PyValue | undefined, fallback: number) => {
     if (v === undefined) return fallback;
@@ -579,9 +623,9 @@ const LIST: MethodTable = Object.assign(Object.create(null), {
   pop(_rt, list: PyList, args) {
     arity('pop', args, 0, 1);
     const length = list.items.length;
+    const n = args.length === 0 ? -1 : int('pop', args[0]);
     if (length === 0) throw new IndexError('pop from empty list');
     if (args.length === 0) return list.items.pop()!;
-    const n = int('pop', args[0]);
     const at = n < 0 ? n + length : n;
     if (at < 0 || at >= length) throw new IndexError('pop index out of range');
     return list.items.splice(at, 1)[0];
@@ -661,13 +705,15 @@ const DICT: MethodTable = Object.assign(Object.create(null), {
   // Deliberate deviation from CPython: with a default given, a key holding
   // None also returns the default, so `row.get("amount", 0)` survives JSON nulls.
   get(_rt, dict: PyDict, args) {
-    arity('get', args, 1, 2);
+    expectedArgs('get', args, 1, 2);
     const value = dictGet(dict, args[0]);
     if (value === undefined || (value === null && args.length > 1)) return args.length > 1 ? args[1] : null;
     return value;
   },
   pop(_rt, dict: PyDict, args) {
-    arity('pop', args, 1, 2);
+    expectedArgs('pop', args, 1, 2);
+    // An empty dict reports the missing key before it would hash it.
+    if (dict.map.size === 0 && args.length === 1) throw keyError(args[0]);
     const value = dictGet(dict, args[0]);
     if (value !== undefined) {
       dictDelete(dict, args[0]);
@@ -932,8 +978,12 @@ export function getAttribute(obj: PyValue, name: string): PyValue {
     else if (obj instanceof PyBuiltin) value = obj.attrs?.get(name);
   } else if (obj instanceof PyFloat) {
     if (name === 'is_integer') value = new PyBuiltin(name, () => Number.isInteger(obj.v));
+    else if (name === 'as_integer_ratio') value = new PyBuiltin(name, () => new PyTuple(floatRatio(obj.v)));
   } else if (isIntLike(obj)) {
-    if (name === 'bit_length') value = new PyBuiltin(name, () => bitLength(BigInt(obj)));
+    const n: number | bigint = typeof obj === 'boolean' ? (obj ? 1 : 0) : obj;
+    if (name === 'bit_length') value = new PyBuiltin(name, () => bitLength(BigInt(n)));
+    else if (name === 'is_integer') value = new PyBuiltin(name, () => true);
+    else if (name === 'as_integer_ratio') value = new PyBuiltin(name, () => new PyTuple([n, 1]));
   }
   if (value === undefined) throw noAttribute(obj, name);
   return value;

@@ -38,6 +38,7 @@ Top-level variables live in a `Globals` table owned by the interpreter: the comp
 bun test                        # full suite
 bun test tests/features.test.ts # behavioral surface
 bun run conformance:record      # re-record CPython's output for tests/conformance
+bun run fuzz --count 500        # random programs diffed against CPython; PYTHON=python3.14 to pick the binary
 bun run typecheck
 bun bench                       # performance benchmarks (median/min/max)
 bun bench --json                # machine-readable output

@@ -164,7 +164,7 @@ The constructs models emit anyway (`class`, `with`, `match`, `async`/`await`, `b
 
 ### Where it deliberately differs from CPython
 
-Everything else is meant to match CPython 3.14, and `tests/conformance` checks that against a recorded CPython run.
+Everything else is meant to match CPython 3.14. `tests/conformance` checks that against a recorded CPython run, and `bun run fuzz` generates random programs over the supported surface, runs them through CPython and defanged, and prints every expression whose output differs, error messages included.
 
 | Behavior | Why |
 |---|---|

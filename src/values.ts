@@ -462,6 +462,8 @@ export function pyEquals(a: PyValue, b: PyValue): boolean {
 /** `a is b`. Small ints, strings and the singletons behave as interned. */
 export function pyIs(a: PyValue, b: PyValue): boolean {
   if (a instanceof PyType && b instanceof PyType) return a.canonical === b.canonical;
+  // CPython keeps one empty tuple, so `() is ()`.
+  if (a instanceof PyTuple && b instanceof PyTuple && a.items.length === 0 && b.items.length === 0) return true;
   return a === b;
 }
 
@@ -549,7 +551,13 @@ export function hashKey(v: PyValue, usage?: 'dict key' | 'set element'): HashKey
     // Each item is written as "<length>:<key>", so no two tuples share a key.
     let key = '\x00t';
     for (const item of v.items) {
-      const k = hashKey(item, usage);
+      let k: HashKey;
+      try {
+        k = hashKey(item);
+      } catch (e) {
+        if (usage && e instanceof TypeError) throw new TypeError(`cannot use 'tuple' as a ${usage} (${e.baseMessage})`);
+        throw e;
+      }
       const part = typeof k === 'number' ? '#' + k : 's' + k;
       key += part.length + ':' + part;
     }
@@ -573,7 +581,12 @@ export function hashKey(v: PyValue, usage?: 'dict key' | 'set element'): HashKey
     parts.sort();
     return (v.hash = '\x00f' + parts.join(''));
   }
-  if (v instanceof PyList || v instanceof PyDict || v instanceof PySet || v instanceof PySlice || v instanceof PyDictView) {
+  if (v instanceof PySlice) {
+    // Hashable since 3.12, so `d[1:2]` is a KeyError rather than a TypeError.
+    const part = (x: PyValue) => { const k = hashKey(x, usage); return (typeof k === 'number' ? '#' + k : 's' + k) + ';'; };
+    return '\x00sl' + part(v.start) + part(v.stop) + part(v.step);
+  }
+  if (v instanceof PyList || v instanceof PyDict || v instanceof PySet || v instanceof PyDictView) {
     const name = typeName(v);
     throw new TypeError(usage
       ? `cannot use '${name}' as a ${usage} (unhashable type: '${name}')`

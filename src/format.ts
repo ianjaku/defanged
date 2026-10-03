@@ -5,9 +5,9 @@
 
 import { formatDatetime } from './datetime';
 import { IndexError, MemoryError, OverflowError, TypeError, ValueError } from './errors';
-import { PyFloat, PyInt, floatRepr, isIntLike, toFixedPy, toFloat } from './numbers';
+import { PyFloat, PyInt, floatRepr, floatToInt, isIntLike, toFixedPy, toFloat } from './numbers';
 import {
-  PyDate, PyDateTime, PyDict, PyTuple, PyValue,
+  PyDate, PyDateTime, PyDict, PyList, PyTuple, PyValue,
   dictGet, keyError, pyRepr, pyStr, strLength, typeName,
 } from './values';
 
@@ -130,6 +130,7 @@ function formatInt(v: PyInt, s: Spec): string {
       if (s.alternate) prefix = s.type === 'X' ? '0X' : '0x';
       break;
     case 'c':
+      if (v > 9223372036854775807n || v < -9223372036854775808n) throw new OverflowError('Python int too large to convert to C long');
       if (abs > 0x10ffff || negative) throw new OverflowError('%c arg not in range(0x110000)');
       return pad(String.fromCodePoint(Number(abs)), '', s, '<');
     default:
@@ -169,8 +170,8 @@ function formatFloat(x: number, s: Spec): string {
     body = Number.isNaN(x) ? 'nan' : 'inf';
     if ('EFG'.includes(s.type) && s.type !== '') body = body.toUpperCase();
     if (s.type === '%') body += '%';
-    const spec = s.fill === '0' && s.align === '=' ? { ...s, fill: ' ', align: '>' as const } : s;
-    return pad(body, signPrefix(negative && !Number.isNaN(x), s.sign), spec, '>');
+    // Zero padding applies to inf and nan too: format(inf, '08.2f') is '00000inf'.
+    return pad(body, signPrefix(negative && !Number.isNaN(x), s.sign), s, '>');
   }
   switch (s.type) {
     case 'f': case 'F':
@@ -217,7 +218,9 @@ export function formatValue(v: PyValue, spec: string): string {
     const s = parseSpec(spec, 'str');
     if (s.type !== '' && s.type !== 's') throw unknownCode(s.type, 'str');
     if (s.sign) throw new ValueError('Sign not allowed in string format specifier');
+    if (s.alternate) throw new ValueError('Alternate form (#) not allowed in string format specifier');
     if (s.align === '=') throw new ValueError("'=' alignment not allowed in string format specifier");
+    if (s.grouping) throw new ValueError(`Cannot specify '${s.grouping}' with 's'.`);
     const text = s.precision !== undefined ? Array.from(v).slice(0, s.precision).join('') : v;
     return pad(text, '', s, '<');
   }
@@ -225,9 +228,14 @@ export function formatValue(v: PyValue, spec: string): string {
     const s = parseSpec(spec, 'int');
     const n: PyInt = typeof v === 'boolean' ? (v ? 1 : 0) : v;
     if (s.type !== '' && 'eEfFgG%'.includes(s.type)) return formatFloat(toFloat(n), s);
+    if (s.type === 's') throw unknownCode('s', typeName(v));
     return formatInt(n, s);
   }
-  if (v instanceof PyFloat) return formatFloat(v.v, parseSpec(spec, 'float'));
+  if (v instanceof PyFloat) {
+    const s = parseSpec(spec, 'float');
+    if (s.type !== '' && !'eEfFgGn%'.includes(s.type)) throw unknownCode(s.type, 'float');
+    return formatFloat(v.v, s);
+  }
   throw new TypeError(`unsupported format string passed to ${typeName(v)}.__format__`);
 }
 
@@ -249,13 +257,40 @@ export function asciiRepr(v: PyValue): string {
 function percentNumber(v: PyValue, code: string): PyInt | PyFloat {
   if (isIntLike(v)) return typeof v === 'boolean' ? (v ? 1 : 0) : v;
   if (v instanceof PyFloat) return v;
-  const what = 'diu'.includes(code) ? 'a real number' : 'xXo'.includes(code) ? 'an integer' : 'a real number';
+  // The float codes go through float() and report its error.
+  if ('fFeEgG'.includes(code)) throw new TypeError(`must be real number, not ${typeName(v)}`);
+  const what = 'xXo'.includes(code) ? 'an integer' : 'a real number';
   throw new TypeError(`%${code} format: ${what} is required, not ${typeName(v)}`);
+}
+
+/** `%c`: one character, or a code point as an int. */
+function percentChar(v: PyValue): string {
+  if (typeof v === 'string') {
+    if (strLength(v) !== 1) throw new TypeError(`%c requires an int or a unicode character, not a string of length ${strLength(v)}`);
+    return v;
+  }
+  if (!isIntLike(v)) throw new TypeError(`%c requires an int or a unicode character, not ${typeName(v)}`);
+  const n = typeof v === 'boolean' ? (v ? 1 : 0) : v;
+  if (n < 0 || n > 0x10ffff) throw new OverflowError('%c arg not in range(0x110000)');
+  return String.fromCodePoint(Number(n));
+}
+
+function checkStray(format: string, from: number, to: number): void {
+  const at = format.indexOf('%', from);
+  if (at < 0 || at >= to) return;
+  // Skip the flags, width and precision to name the character that is wrong.
+  const m = /^%(?:\([^)]*\))?[-+ 0#]*(?:\*|\d+)?(?:\.(?:\*|\d+))?/.exec(format.slice(at))!;
+  const bad = format[at + m[0].length];
+  // A '.' with nothing after it is still an unfinished conversion.
+  if (bad === undefined || (bad === '.' && at + m[0].length === format.length - 1)) throw new ValueError('incomplete format');
+  throw new ValueError(`unsupported format character '${bad}' (0x${bad.charCodeAt(0).toString(16)}) at index ${at + m[0].length}`);
 }
 
 /** Python's `format % values`. */
 export function percentFormat(format: string, values: PyValue): string {
   const positional = values instanceof PyTuple ? values.items : [values];
+  // Anything subscriptable but a tuple or str counts as a mapping, so `'a' % []` is 'a'.
+  const mapping = values instanceof PyDict || values instanceof PyList;
   let next = 0;
   let usedMapping = false;
   const re = /%(?:\(([^)]*)\))?([-+ 0#]*)(\*|\d+)?(?:\.(\*|\d+))?([a-zA-Z%])/g;
@@ -270,6 +305,13 @@ export function percentFormat(format: string, values: PyValue): string {
     return v;
   };
 
+  // A '%' outside the conversions the pattern reads is an error, not text.
+  let last = 0;
+  for (const m of format.matchAll(re)) {
+    checkStray(format, last, m.index);
+    last = m.index + m[0].length;
+  }
+  checkStray(format, last, format.length);
   const out = format.replace(re, (_match, key: string | undefined, flags: string, width: string | undefined, precision: string | undefined, code: string) => {
     if (code === '%') return '%';
     const s: Spec = {
@@ -286,9 +328,10 @@ export function percentFormat(format: string, values: PyValue): string {
 
     let value: PyValue;
     if (key !== undefined) {
-      if (!(values instanceof PyDict)) throw new TypeError('format requires a mapping');
+      if (!mapping) throw new TypeError('format requires a mapping');
       usedMapping = true;
-      const found = dictGet(values, key);
+      if (values instanceof PyList) throw new TypeError('list indices must be integers or slices, not str');
+      const found = dictGet(values as PyDict, key);
       if (found === undefined) throw keyError(key);
       value = found;
     } else {
@@ -303,7 +346,7 @@ export function percentFormat(format: string, values: PyValue): string {
       }
       case 'd': case 'i': case 'u': {
         const n = percentNumber(value, code);
-        const whole: PyInt = n instanceof PyFloat ? BigInt(Math.trunc(n.v)) : n;
+        const whole: PyInt = n instanceof PyFloat ? floatToInt(n.v) : n;
         return formatInt(whole, { ...s, type: 'd', precision: undefined });
       }
       case 'x': case 'X': case 'o': {
@@ -313,16 +356,14 @@ export function percentFormat(format: string, values: PyValue): string {
       }
       case 'f': case 'F': case 'e': case 'E': case 'g': case 'G':
         return formatFloat(toFloat(percentNumber(value, code)), s);
-      case 'c': {
-        const ch = typeof value === 'string' ? value : String.fromCodePoint(Number(percentNumber(value, code)));
-        return pad(ch, '', { ...s, fill: ' ' }, '>');
-      }
+      case 'c':
+        return pad(percentChar(value), '', { ...s, fill: ' ' }, '>');
       default:
         throw new ValueError(`unsupported format character '${code}'`);
     }
   });
 
-  if (!usedMapping && next < positional.length && !(values instanceof PyDict)) {
+  if (!usedMapping && next < positional.length && !mapping) {
     throw new TypeError('not all arguments converted during string formatting');
   }
   return out;
