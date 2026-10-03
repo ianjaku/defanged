@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.png" alt="defanged logo" width="600" />
+  <img src="https://raw.githubusercontent.com/ianjaku/defanged/main/logo.png" alt="defanged: a small snake under a bell jar" width="600" />
 </p>
 
 # defanged
