@@ -4,15 +4,13 @@
 
 # defanged
 
-Run Python written by an LLM inside your Node or Bun app. It cannot touch your disk, your network or your process, because those parts were never built.
+**defanged** is a Python interpreter written in TypeScript. It runs the Python an LLM wrote inside your Node or Bun process, with CPython's behaviour for the subset it supports, step and time budgets you set, and host functions you register as the only door to the outside. There is no filesystem, network or subprocess layer to break into, because the interpreter never implemented one.
 
 ```typescript
 import { runPython } from "defanged";
 
 await runPython(`sum(x * x for x in range(10))`); // 285
 ```
-
-The only way out of the sandbox is a function you hand in. No tool, no exit.
 
 [![npm](https://img.shields.io/npm/v/defanged.svg)](https://www.npmjs.com/package/defanged)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
