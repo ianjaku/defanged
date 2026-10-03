@@ -27,7 +27,7 @@ customers = fetch_customers(quarter="2026-Q1")
 lost = [c for c in customers if c["churned"]]
 f"{len(lost) / len(customers):.1%} churn ({len(lost)} of {len(customers)})"
   `,
-  [{ name: "fetch_customers", handler: ({ quarter }) => db.customers.forQuarter(quarter) }],
+  { fetch_customers: (quarter) => db.customers.forQuarter(quarter) },
 ); // "4.2% churn (17 of 405)"
 ```
 
@@ -35,7 +35,7 @@ f"{len(lost) / len(customers):.1%} churn ({len(lost)} of {len(customers)})"
 
 ```typescript
 const interpreter = createInterpreter({
-  tools: [{ name: "fetch_orders", handler: () => orders }],
+  tools: { fetch_orders: () => orders },
   onTable: (t) => ui.renderTable(t),
   onChart: (c) => ui.renderChart(c),
 });
@@ -52,7 +52,7 @@ print_chart("bar", rows, x="month", y="revenue", title="Revenue by month")
 
 ```typescript
 const rules = createInterpreter({
-  tools: [{ name: "order", handler: () => order }],
+  tools: { order: () => order },
   maxIterations: 10_000,
   timeoutMs: 50,
 });
@@ -101,19 +101,13 @@ transactions = fetch_transactions("2026-04")
 total = sum([t['amount'] for t in transactions if t['amount'] > 0])
 f"Inflow: {total}"
   `,
-  [
-    {
-      name: "fetch_transactions",
-      description: "Fetch transactions for a given month (YYYY-MM).",
-      handler: async (month: string) => {
-        return await db.transactions.findMany({ where: { month } });
-      },
-    },
-  ],
+  {
+    fetch_transactions: async (month: string) => db.transactions.findMany({ where: { month } }),
+  },
 );
 ```
 
-Handlers can be synchronous or async. The interpreter awaits async handlers automatically.
+A tool is a plain function. Handlers can be synchronous or async; the interpreter awaits async handlers automatically. `fetch_transactions("2026-04")` and `fetch_transactions(month="2026-04")` both reach `month`, see "Tools" under API for how.
 
 ### Reusable interpreter
 
@@ -121,7 +115,7 @@ Handlers can be synchronous or async. The interpreter awaits async handlers auto
 import { createInterpreter } from "defanged";
 
 const interpreter = createInterpreter({
-  tools: [...],
+  tools: { ... },
   onPrint: (msg) => logger.info(msg),
   maxIterations: 10_000, // lower for untrusted input
 });
@@ -221,7 +215,7 @@ One-shot execution. Returns the value of the last expression, or `None` if the c
 
 Long-lived interpreter. Options:
 
-- `tools: ToolDefinition[]` — functions callable from Python
+- `tools: Tools` — functions callable from Python, by name; see "Tools" below
 - `onPrint: (msg: string) => void` — called for every `print()` invocation. Without it, `print()` raises, so the model is told to use the two below instead
 - `onTable: (t: { data, columns, title? }) => void` — receives `print_table(data, columns, title=)` calls: `data` is a list of dicts as plain objects, `columns` is `[{ key, label, format? }]`
 - `onChart: (c: { type, data, x, y, title? }) => void` — receives `print_chart(type, data, x, y, title=)` calls; `type` is `bar`, `line`, `pie` or `area`, `y` a key or list of keys
@@ -256,33 +250,54 @@ Each one is pure computation, so the safety boundary does not move. `json` has `
 
 A module is a `PyModule` built from the value classes the package exports. That API exists so the six above can live outside the core; it is not yet documented or stable for third-party modules.
 
-### `ToolDefinition`
+### Tools
+
+A tool is a function the script can call by name. Two forms:
 
 ```typescript
-interface ToolDefinition {
-  name: string;
-  description?: string;
-  handler: (...args: any[]) => any | Promise<any>;
-  parameters?: ToolParameter[]; // metadata for generateToolsPrompt
-  group?: string;               // section heading in generateToolsPrompt
-}
+createInterpreter({
+  tools: {
+    // A plain function. Arguments arrive in parameter order.
+    fetch_customers: (quarter, limit = 100) => db.customers.forQuarter(quarter, limit),
+
+    // A spec, when the model needs types and descriptions. The handler gets one object.
+    create_report: {
+      description: "Render a report and return its URL.",
+      params: {
+        report: { type: "dict", description: "{title, sections: [{name, rows}]}" },
+        format: { type: "str", default: "pdf" },
+        notify: "bool?",
+      },
+      handler: ({ report, format, notify }) => render(report, format, notify),
+    },
+  },
+});
 ```
 
-**Calling convention.** Handlers receive the script's positional arguments (marshalled to plain JS values) followed by **one trailing kwargs object**, which is always present when the call uses keyword arguments and is `{}` for zero-argument calls:
+**Plain functions.** Positional arguments are passed positionally. Keyword arguments fill parameters by name, using the names read from the function's source, so `fetch_customers("Q1", limit=5)` and `fetch_customers(limit=5, quarter="Q1")` both work. Keywords that match no parameter fill the remaining parameters in order, and anything still left over arrives as one trailing object. If the parameter list cannot be read (destructuring, `...rest`), keywords always arrive as that trailing object, so `({ quarter }) => ...` works for keyword calls.
 
-```python
-f()           # handler({})
-f("a")        # handler("a", {})
-f("a", x=1)   # handler("a", { x: 1 })
+> **Minifiers rename parameters.** The by-name matching reads parameter names from the function's source. A production build that minifies server code (Next.js does by default) turns `(quarter, limit) =>` into `(e, t) =>`, and keyword calls then fall back to "fill in order". For one or two parameters that is harmless; for a tool with several parameters called with keywords out of order, it is wrong, silently. Declare `params` for those tools, or turn off server minification.
+
+**Specs.** `params` maps each parameter name to a type (`'str'`, `'int'`, `'float'`, `'bool'`, `'list'`, `'dict'`, `'datetime'`, `'any'`), a type with `?` for optional, or `{ type?, description?, default? }`. A `default` is a JS value and makes the parameter optional. The handler always receives one object keyed by parameter name, however the script called the tool, with defaults filled in. Calls the spec cannot accept raise a Python `TypeError` the script can catch, with CPython's wording: `create_report() missing 1 required argument: 'report'`, `got an unexpected keyword argument 'x'`, `takes 3 positional arguments but 4 were given`.
+
+Wrap a spec in `tool()` to type the handler from its `params`:
+
+```typescript
+import { tool } from "defanged";
+
+const create_report = tool({
+  params: { report: "dict", format: { type: "str", default: "pdf" } },
+  handler: ({ report, format }) => render(report, format), // report: Record<string, any>, format: string
+});
 ```
-
-Note the ambiguity: a final positional dict is indistinguishable from kwargs. Prefer keyword-only tools, or put dict parameters first. (A cleaner `(args, kwargs)` signature is planned for a later release.)
 
 **Errors.** A JS exception thrown (or rejected) by a handler surfaces in Python as a `ToolError` — catchable with `except ToolError`, `except RuntimeError`, or `except Exception` — so scripts can implement fallbacks. The message is `Tool '<name>' failed: <error.message>`.
 
-Return values marshal into Python values: arrays → lists, plain objects → dicts, `null`/`undefined` → `None`, and JS `Date` objects → naive `datetime` values in the session timezone (so timestamp columns from database drivers behave like `datetime.now()` output). A JS number becomes an `int` when it is a whole number in the safe-integer range and a `float` otherwise, because JS cannot tell `4` from `4.0`. An invalid `Date` raises `ValueError` in the script, and one outside the years 1 to 9999 raises `OverflowError`.
+**Values.** Arguments reach the handler as plain JS, nested to any depth: `dict` → object (keys stringified), `list`/`tuple`/`set` → array, `int`/`float` → number (an `int` past 2^53 loses precision), `datetime`/`date` → ISO string, `timedelta` → seconds, `None` → `null`.
 
-Going the other way, tuples and sets arrive as arrays, `int` and `float` as numbers, and dict keys as strings.
+Return values marshal back the same way: arrays → lists, plain objects and `Map`s → dicts, `null`/`undefined` → `None`, and JS `Date` objects → naive `datetime` values in the session timezone (so timestamp columns from database drivers behave like `datetime.now()` output). A JS number becomes an `int` when it is a whole number in the safe-integer range and a `float` otherwise, because JS cannot tell `4` from `4.0`. An invalid `Date` raises `ValueError` in the script, and one outside the years 1 to 9999 raises `OverflowError`.
+
+The 0.3 array form (`[{ name, handler, parameters?, description?, group? }]`) is still accepted with its old calling convention: positional arguments followed by one keywords object, always present.
 
 ### Errors the host sees
 
@@ -290,23 +305,25 @@ Every failure is an `InterpreterError` subclass named after the Python exception
 
 ### `generateToolsPrompt(tools, options?)`
 
-Produces a system-prompt fragment describing available tools, for use with Claude / other LLMs. Tools with `parameters` metadata render Python-style signatures with per-argument docs; tools sharing a `group` render under a `##` section heading (useful past ~10 tools); `{ includeLanguageNotes: true }` appends a short description of the supported Python subset so hosts don't each hand-write it. The notes also tell the model to join two lists through a dict, because a nested-loop join over a few thousand rows runs into `maxIterations`.
+Produces a system-prompt fragment describing available tools, for use with Claude / other LLMs. Takes the same `tools` object as `createInterpreter`. A plain function renders as `name(a, b)` from its parameter names; a spec renders types, defaults and per-argument descriptions. Tools sharing a `group` render under a `##` section heading (useful past ~10 tools); `{ includeLanguageNotes: true }` appends a short description of the supported Python subset so hosts don't each hand-write it. The notes also tell the model to join two lists through a dict, because a nested-loop join over a few thousand rows runs into `maxIterations`.
 
 ```typescript
-generateToolsPrompt([
-  {
-    name: "get_sales",
+generateToolsPrompt({
+  today: () => new Date(),
+  get_sales: {
     description: "Fetch sales rows for a region.",
-    handler: getSales,
     group: "Data",
-    parameters: [
-      { name: "region", type: "str", description: "Sales region code" },
-      { name: "currency", type: "str", default: '"USD"' },
-    ],
+    params: {
+      region: { type: "str", description: "Sales region code" },
+      currency: { type: "str", default: "USD" },
+    },
+    handler: getSales,
   },
-], { includeLanguageNotes: true });
+}, { includeLanguageNotes: true });
+// - today() - No description
+//
 // ## Data
-// - get_sales(region: str, currency: str = "USD") - Fetch sales rows for a region.
+// - get_sales(region: str, currency: str = 'USD') - Fetch sales rows for a region.
 //     region: Sales region code
 // ...
 ```
@@ -331,6 +348,7 @@ source code ──► lexer ──► parser ──► compiler ──► VM ─
 - `src/datetime.ts`, `src/math.ts`, `src/statistics.ts`, `src/re.ts` — the built-in modules
 - `src/json.ts`, `src/itertools.ts`, `src/collections.ts`, `src/functools.ts`, `src/string.ts`, `src/random.ts` — the optional modules, each its own entry point
 - `src/errors.ts` — the exception classes
+- `src/tools.ts` — the `tools` option: forms, argument resolution, prompt signatures
 - `src/interpreter.ts` — the public `Interpreter`: options, tools, `run()`
 
 A Python call pushes a frame on the VM's own stack instead of recursing in JS. That is what lets a tool call pause the whole script on a promise from anywhere (inside a comprehension, a generator, a `sorted` key function), and what turns runaway recursion into a `RecursionError` instead of a crashed host. The one place JS does nest is a built-in calling back into Python, and the VM caps that at 100 levels.
@@ -360,7 +378,7 @@ Three things keep that cheap, and they are worth knowing when you write tools:
 - `maxIterations` now also caps the number of function calls, and `finally` blocks no longer run when `MaxIterationsError` or `TimeoutError` ends a script.
 - `sorted(..., reverse=True)` keeps equal items in their original order, as CPython does.
 
-For hosts: the tool calling convention, `runPython`, `createInterpreter` and the exported error classes are unchanged. Two things changed for code that reached into internals: the constructor arguments of `NameError`, `KeyError` and `ZeroDivisionError`, and the exported value types (the old tagged objects such as `PyNumber` and the `Environment` class are gone).
+For hosts: `tools` is now an object keyed by tool name (`{ fetch: (q) => ... }`) and keyword arguments reach a plain function's parameters by name; see "Tools". The 0.3 array of `{ name, handler }` still works with its old convention, so nothing breaks, but the `ToolDefinition` type is only kept for it. `runPython`, `createInterpreter` and the exported error classes are unchanged. Two things changed for code that reached into internals: the constructor arguments of `NameError`, `KeyError` and `ZeroDivisionError`, and the exported value types (the old tagged objects such as `PyNumber` and the `Environment` class are gone).
 
 ---
 

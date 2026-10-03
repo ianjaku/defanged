@@ -8,7 +8,9 @@
 export { tokenize, Lexer } from './lexer';
 export { parse, Parser } from './parser';
 export { createInterpreter, Interpreter } from './interpreter';
-export type { ToolDefinition, ToolParameter, InterpreterOptions, ResourceLimits } from './interpreter';
+export type { InterpreterOptions, ResourceLimits } from './interpreter';
+export { tool } from './tools';
+export type { Tools, ToolSpec, ToolFunction, ParamSpec, ParamType, ArgsOf, ToolDefinition, ToolParameter } from './tools';
 
 // Re-export types
 export * from './tokens';
@@ -17,7 +19,8 @@ export * from './values';
 export * from './errors';
 
 // Convenience function for quick execution
-import { createInterpreter, type InterpreterOptions, type ToolDefinition } from './interpreter';
+import { createInterpreter, type InterpreterOptions } from './interpreter';
+import { NormalizedTool, ToolDefinition, Tools, normalizeTools, renderSignature } from './tools';
 
 /**
  * One-shot execution. The third argument is either a print callback or the
@@ -25,7 +28,7 @@ import { createInterpreter, type InterpreterOptions, type ToolDefinition } from 
  */
 export async function runPython(
   code: string,
-  tools?: ToolDefinition[],
+  tools?: Tools | ToolDefinition[],
   options?: ((output: string) => void) | Omit<InterpreterOptions, 'tools'>
 ): Promise<any> {
   const rest = typeof options === 'function' ? { onPrint: options } : options;
@@ -39,15 +42,9 @@ export interface ToolsPromptOptions {
   includeLanguageNotes?: boolean;
 }
 
-function renderTool(tool: ToolDefinition): string {
-  const params = (tool.parameters ?? []).map(p => {
-    let sig = p.name;
-    if (p.type) sig += `: ${p.type}`;
-    if (p.default !== undefined) sig += ` = ${p.default}`;
-    return sig;
-  }).join(', ');
-  const lines = [`- ${tool.name}(${params}) - ${tool.description || 'No description'}`];
-  for (const p of tool.parameters ?? []) {
+function renderTool(tool: NormalizedTool): string {
+  const lines = [`- ${renderSignature(tool)} - ${tool.description || 'No description'}`];
+  for (const p of tool.params) {
     if (p.description) lines.push(`    ${p.name}: ${p.description}`);
   }
   return lines.join('\n');
@@ -64,9 +61,9 @@ const LANGUAGE_NOTES = `Language notes:
  * Generate a system prompt based on available tools. Tools that share a
  * `group` are rendered under a section heading, in first-seen order.
  */
-export function generateToolsPrompt(tools: ToolDefinition[], options: ToolsPromptOptions = {}): string {
-  const groups = new Map<string, ToolDefinition[]>();
-  for (const tool of tools) {
+export function generateToolsPrompt(tools: Tools | ToolDefinition[], options: ToolsPromptOptions = {}): string {
+  const groups = new Map<string, NormalizedTool[]>();
+  for (const tool of normalizeTools(tools)) {
     const key = tool.group ?? '';
     const list = groups.get(key);
     if (list) list.push(tool);

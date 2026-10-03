@@ -11,43 +11,11 @@ import { mathModule } from './math';
 import { parse } from './parser';
 import { reModule } from './re';
 import { statisticsModule } from './statistics';
+import { NormalizedTool, ToolDefinition, Tools, normalizeTools, resolveArguments } from './tools';
 import {
   DateConverter, Globals, PyBuiltin, PyDateTime, PyIterator, PyList, PyModule, PyValue, jsToValue, setOwn, valueToJs,
 } from './values';
 import { VM, VMHost, fromRangeError } from './vm';
-
-/** Metadata for one tool parameter, used by generateToolsPrompt to render a
- *  Python-style signature. Purely descriptive — nothing is validated against it. */
-export interface ToolParameter {
-  name: string;
-  /** Python type shown in the signature, e.g. 'str', 'int', 'list[dict]'. */
-  type?: string;
-  /** Rendered verbatim as the default value, e.g. '"USD"' or 'None'.
-   *  A parameter with a default is implicitly optional. */
-  default?: string;
-  description?: string;
-}
-
-export interface ToolDefinition {
-  name: string;
-  description?: string;
-  /**
-   * Called with the script's positional arguments (marshalled to plain JS
-   * values) followed by ONE trailing kwargs object — always present when the
-   * call site uses keyword arguments, `{}` included for zero-arg calls:
-   *   f()          → handler({})
-   *   f("a")       → handler("a", {})
-   *   f("a", x=1)  → handler("a", { x: 1 })
-   * Note the ambiguity: a final positional dict is indistinguishable from
-   * kwargs. Prefer keyword-only tools or put dicts first.
-   * A thrown JS error surfaces in Python as a catchable ToolError.
-   */
-  handler: (...args: any[]) => any | Promise<any>;
-  /** Parameter metadata for generateToolsPrompt (signatures + per-arg docs). */
-  parameters?: ToolParameter[];
-  /** Section heading used by generateToolsPrompt to group large tool sets. */
-  group?: string;
-}
 
 /** Crude allocation bounds: an operation that would build one huge value
  *  (`[0] * 10**9`, `list(range(10**9))`, a giant join) fails with a Python
@@ -60,7 +28,10 @@ export interface ResourceLimits {
 }
 
 export interface InterpreterOptions extends BuiltinCallbacks {
-  tools?: ToolDefinition[];
+  /** Functions the script may call, by name: a plain function, or
+   *  `{ params, handler }` when the model needs types and descriptions.
+   *  See `Tools` in tools.ts. The 0.3 array form is still accepted. */
+  tools?: Tools | ToolDefinition[];
   onPrint?: PrintCallback;
   /** Budget for loop iterations, and separately for function calls, per
    *  run(). Exceeding either raises an uncatchable MaxIterationsError.
@@ -101,9 +72,8 @@ export class Interpreter {
       onTable: options.onTable,
     });
     // A tool never shadows a built-in of the same name.
-    for (const tool of options.tools ?? []) {
-      const name = tool.name.replace(/\(\)$/, '');
-      if (!builtins.has(name)) builtins.set(name, this.toolFunction({ ...tool, name }));
+    for (const tool of normalizeTools(options.tools)) {
+      if (!builtins.has(tool.name)) builtins.set(tool.name, this.toolFunction(tool));
     }
 
     // math/statistics/re are stateless singletons; only datetime is built per
@@ -155,13 +125,18 @@ export class Interpreter {
     return Promise.race([running, expired]).finally(() => clearTimeout(timer));
   }
 
-  private toolFunction(tool: ToolDefinition): PyBuiltin {
+  private toolFunction(tool: NormalizedTool): PyBuiltin {
     return new PyBuiltin(tool.name, async (_rt, args, kwargs): Promise<PyValue> => {
-      const options: Record<string, any> = {};
-      if (kwargs) for (const [key, value] of kwargs) setOwn(options, key, valueToJs(value));
+      let keywords: Record<string, any> | null = null;
+      if (kwargs && kwargs.size > 0) {
+        keywords = {};
+        for (const [key, value] of kwargs) setOwn(keywords, key, valueToJs(value));
+      }
+      // Argument errors are the script's fault, so they stay Python TypeErrors.
+      const jsArgs = resolveArguments(tool, args.map((arg) => valueToJs(arg)), keywords);
       let result: any;
       try {
-        result = await tool.handler(...args.map((arg) => valueToJs(arg)), options);
+        result = await tool.fn(...jsArgs);
       } catch (e) {
         // A JS throw surfaces as a Python-catchable ToolError so scripts can
         // implement fallbacks; the VM stamps the call site onto it.

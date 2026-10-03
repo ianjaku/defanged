@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'bun:test';
-import { createInterpreter, ToolDefinition, generateToolsPrompt } from '../src';
+import { createInterpreter, ToolDefinition, generateToolsPrompt, runPython, tool } from '../src';
+import { parameterNames } from '../src/tools';
 
 describe('Tool Injection', () => {
   describe('Basic Tool Calls', () => {
@@ -701,6 +702,120 @@ describe('Handler calling convention', () => {
     });
     await interpreter.run('f("a", 2, x=1, y="z")');
     expect(received).toEqual(['a', 2, { x: 1, y: 'z' }]);
+  });
+});
+
+describe('Tools as an object of functions', () => {
+  const calls: any[][] = [];
+  const it = createInterpreter({
+    tools: {
+      fetch: (quarter: string, limit = 10) => ({ quarter, limit }),
+      minified: (e: any, t: any) => [e, t],
+      destructured: ({ quarter }: any) => quarter,
+      rest: (...args: any[]) => { calls.push(args); return args.length; },
+      noargs: () => 'ok',
+      asyncFn: async (n: number) => n + 1,
+    },
+  });
+
+  test('positional and keyword calls both reach the named parameters', async () => {
+    expect(await it.run('fetch("Q1")')).toEqual({ quarter: 'Q1', limit: 10 });
+    expect(await it.run('fetch(quarter="Q1")')).toEqual({ quarter: 'Q1', limit: 10 });
+    expect(await it.run('fetch("Q1", limit=5)')).toEqual({ quarter: 'Q1', limit: 5 });
+    expect(await it.run('fetch(limit=5, quarter="Q1")')).toEqual({ quarter: 'Q1', limit: 5 });
+    expect(await it.run('asyncFn(n=1)')).toBe(2);
+  });
+
+  test('keywords that match no parameter fill the free slots in order (minified names)', async () => {
+    expect(await it.run('minified(quarter="Q1", limit=5)')).toEqual(['Q1', 5]);
+    expect(await it.run('minified("Q1", limit=5)')).toEqual(['Q1', 5]);
+  });
+
+  test('unreadable parameter lists fall back to a trailing keywords object', async () => {
+    expect(await it.run('destructured(quarter="Q1")')).toBe('Q1');
+    calls.length = 0;
+    await it.run('rest(1, 2, k=3)');
+    await it.run('rest()');
+    expect(calls).toEqual([[1, 2, { k: 3 }], [{}]]);
+  });
+
+  test('keywords with nowhere to go arrive as one trailing object', async () => {
+    const received: any[][] = [];
+    const one = createInterpreter({ tools: { f: (a: any, ...more: any[]) => { received.push([a, ...more]); return null; } } });
+    // `...more` makes the list unreadable, so this is the fallback form.
+    await one.run('f(1, x=2)');
+    const two = createInterpreter({ tools: { g: (a: any) => { received.push([a]); return null; } } });
+    await two.run('g(1, x=2)');
+    expect(received).toEqual([[1, { x: 2 }], [1]]);
+  });
+
+  test('a tool with no parameters ignores keywords', async () => {
+    expect(await it.run('noargs()')).toBe('ok');
+    expect(await it.run('noargs(k=1)')).toBe('ok');
+  });
+
+  test('runPython takes the same object', async () => {
+    expect(await runPython('double(4)', { double: (n: number) => n * 2 })).toBe(8);
+  });
+
+  test('parameterNames reads the common function shapes', () => {
+    function named(x: any, y = 2) { return x + y; }
+    expect(parameterNames((a: any, b = Math.max(1, 2)) => a + b)).toEqual(['a', 'b']);
+    expect(parameterNames(named)).toEqual(['x', 'y']);
+    expect(parameterNames(async (a: any) => a)).toEqual(['a']);
+    expect(parameterNames(() => 1)).toEqual([]);
+    expect(parameterNames(({ a }: any) => a)).toBeNull();
+    expect(parameterNames((...r: any[]) => r)).toBeNull();
+    expect(parameterNames(([a]: any) => a)).toBeNull();
+  });
+});
+
+describe('Tools with params', () => {
+  const it = createInterpreter({
+    tools: {
+      spec: tool({
+        description: 'A spec tool',
+        params: { quarter: 'str', limit: 'int?', opts: { type: 'dict', description: 'options', default: { a: 1 } } },
+        handler: ({ quarter, limit, opts }) => ({ quarter, limit: limit === undefined ? 'unset' : limit, opts }),
+      }),
+      inline: { params: { x: 'int' }, handler: ({ x }: { x: number }) => x * 2 },
+      bare: { handler: () => 'no params' },
+    },
+  });
+
+  test('the handler always receives one object, however the script called it', async () => {
+    expect(await it.run('spec("Q1")')).toEqual({ quarter: 'Q1', limit: 'unset', opts: { a: 1 } });
+    expect(await it.run('spec(quarter="Q1", limit=3)')).toEqual({ quarter: 'Q1', limit: 3, opts: { a: 1 } });
+    expect(await it.run('spec("Q1", opts={"b": [1, {"c": 2}]})')).toEqual({ quarter: 'Q1', limit: 'unset', opts: { b: [1, { c: 2 }] } });
+    expect(await it.run('inline(21)')).toBe(42);
+    expect(await it.run('inline(x=21)')).toBe(42);
+    expect(await it.run('bare()')).toBe('no params');
+  });
+
+  test('calls the spec cannot accept raise a catchable Python TypeError', async () => {
+    await expect(it.run('spec()')).rejects.toThrow("spec() missing 1 required argument: 'quarter'");
+    await expect(it.run('spec("Q1", 1, {}, 4)')).rejects.toThrow('spec() takes 3 positional arguments but 4 were given');
+    await expect(it.run('spec("Q1", bogus=1)')).rejects.toThrow("spec() got an unexpected keyword argument 'bogus'");
+    await expect(it.run('spec("Q1", quarter="Q2")')).rejects.toThrow("spec() got multiple values for argument 'quarter'");
+    expect(await it.run('try:\n    inline()\nexcept TypeError as e:\n    str(e)')).toBe("inline() missing 1 required argument: 'x'");
+  });
+
+  test('a default is a JS value and is applied when the argument is missing', async () => {
+    const d = createInterpreter({ tools: { f: { params: { when: { default: new Date(0) } }, handler: ({ when }: any) => when instanceof Date } } });
+    expect(await d.run('f()')).toBe(true);
+  });
+
+  test('the prompt shows types, defaults and descriptions', () => {
+    const prompt = generateToolsPrompt({
+      fetch: (quarter: string, limit = 10) => 1,
+      spec: tool({ description: 'A spec tool', group: 'Data', params: { quarter: 'str', limit: 'int?', opts: { type: 'dict', description: 'options', default: { a: 1 } }, when: { default: 'now' } }, handler: () => 1 }),
+    });
+    expect(prompt).toContain('- fetch(quarter, limit) - No description');
+    expect(prompt).toContain("## Data\n- spec(quarter: str, limit: int = None, opts: dict = {'a': 1}, when = 'now') - A spec tool\n    opts: options");
+  });
+
+  test('a tool entry must be a function or have a handler', () => {
+    expect(() => createInterpreter({ tools: { bad: { params: {} } as any } })).toThrow("Tool 'bad' must be a function or an object with a handler function");
   });
 });
 
