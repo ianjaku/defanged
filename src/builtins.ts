@@ -518,7 +518,8 @@ export function createBuiltins(callbacks: BuiltinCallbacks = {}): Map<string, Py
     const mod = args.length > 2 ? args[2] : kwargs?.get('mod');
     if (mod !== undefined && mod !== null) {
       if (!isIntLike(base) || !isIntLike(exp) || !isIntLike(mod)) {
-        if (!isIntLike(mod) || (isNum(base) && isNum(exp))) throw new TypeError('pow() 3rd argument not allowed unless all arguments are integers');
+        // float's pow owns the call when any operand is a float; int's declines non-ints.
+        if (base instanceof PyFloat || exp instanceof PyFloat || mod instanceof PyFloat) throw new TypeError('pow() 3rd argument not allowed unless all arguments are integers');
         throw new TypeError(`unsupported operand type(s) for ** or pow(): '${typeName(base)}', '${typeName(exp)}', '${typeName(mod)}'`);
       }
       return intPowMod(integer(base, ''), integer(exp, ''), integer(mod, ''));

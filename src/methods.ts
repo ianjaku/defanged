@@ -686,7 +686,7 @@ export function dictUpdate(rt: Runtime, dict: PyDict, source: PyValue | undefine
       const items = pair instanceof PyTuple || pair instanceof PyList ? pair.items
         : typeof pair === 'string' ? strChars(pair) : undefined;
       if (items === undefined) {
-        throw new TypeError(`cannot convert dictionary update sequence element #${i} to a sequence`);
+        throw new TypeError('object is not iterable');
       }
       if (items.length !== 2) {
         throw new ValueError(`dictionary update sequence element #${i} has length ${items.length}; 2 is required`);

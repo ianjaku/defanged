@@ -250,7 +250,7 @@ Each one is pure computation, so the safety boundary does not move. `json` has `
 
 `random` is a port of CPython's generator (Mersenne Twister), so `random.seed(42)` followed by `randint`, `shuffle`, `sample`, `gauss` or any other function gives the numbers CPython gives. Unseeded, each interpreter starts from OS entropy and keeps its own generator between runs, the way one Python process does. `int` and `str` seeds both match CPython (`str` seeds hash through Web Crypto's SHA-512, so `seed()` with a string waits on the host like a tool call does); `float` seeds raise.
 
-A module is a `PyModule` built from the value classes the package exports. That API exists so the six above can live outside the core; it is not yet documented or stable for third-party modules.
+You can write your own: a module is a `PyModule` built from the value classes the package exports, and [`docs/modules.md`](./docs/modules.md) is the guide, with a worked example that the test suite compiles. The names in that guide are stable across minor versions.
 
 ### Tools
 
