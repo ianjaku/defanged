@@ -201,7 +201,7 @@ Neither `MaxIterationsError` nor `TimeoutError` can be caught from Python — no
 
 1. **Tool handlers are trust boundaries.** Whatever a tool handler does with its arguments is on you. If a tool runs SQL, parameterize it. If a tool calls out to a system, validate inputs.
 2. **Memory bounding is crude, not precise accounting.** The `limits` caps guard the operations that can allocate huge results in one step. Many small allocations across millions of iterations are bounded only indirectly (by `maxIterations`); keep a process-level memory budget for hostile input.
-3. **Wall-clock enforcement has gaps.** The `timeoutMs` deadline is checked between operations, and `run()` rejects when it passes while a tool call is still pending. It cannot interrupt a single synchronous operation already in flight: a catastrophically backtracking `re` pattern (on Node, `re.match(r"(a+)+$", "a" * 40 + "b")` does not return) or a tool handler that blocks the event loop. For hard real-time guarantees, run untrusted code in a worker you can kill.
+3. **Wall-clock enforcement has gaps.** The `timeoutMs` deadline is checked between operations, and `run()` rejects when it passes while a tool call is still pending. It cannot interrupt a single synchronous operation already in flight: a catastrophically backtracking `re` pattern (on Node, `re.match(r"(a+)+$", "a" * 40 + "b")` does not return) or a tool handler that blocks the event loop. `defanged/worker` closes this gap: it runs the script in a thread the main thread kills at the deadline.
 
 ---
 
@@ -318,6 +318,22 @@ The 0.3 array form (`[{ name, handler, parameters?, description?, group? }]`) is
 
 Every failure is an `InterpreterError` subclass named after the Python exception (`TypeError`, `KeyError`, `ToolError`, `SyntaxError`, ...), exported from the package for `instanceof` checks. `error.message` is `Line N, Column N: <message>` with CPython's wording, `error.baseMessage` is the message alone, and `error.line` / `error.column` give the position. Three are the host's limits rather than the script's mistakes and cannot be caught by the script: `MaxIterationsError`, `TimeoutError` and `CancelledError`.
 
+### `createWorkerInterpreter(options)` from `defanged/worker`
+
+The same interpreter in its own thread (`node:worker_threads`, so Node and Bun), for the two things the in-process one cannot do: kill a script that never reaches a checkpoint (a backtracking regex, a tool that blocks the event loop) and keep its memory out of the main thread.
+
+```typescript
+import { createWorkerInterpreter } from "defanged/worker";
+import { json } from "defanged/json";
+
+const it = createWorkerInterpreter({ tools: { fetch_orders }, modules: [json], timeoutMs: 1000, onPrint: log });
+const result = await it.run(code);          // same errors, same values as Interpreter.run
+await it.run(more, { signal });             // abort kills the thread at once
+await it.terminate();                       // when you are done with it
+```
+
+Tools and the `onPrint`/`onChart`/`onTable` hooks stay on the main thread and are called over messages, so a handler may close over anything; arguments and results cross as structured clones (plain values, arrays, objects, `Date`s). `timeoutMs` is enforced twice: the interpreter stops itself where it can, and the main thread terminates the thread `killGraceMs` (default 100) later if it did not. A killed thread is replaced on the next `run()`, with fresh globals. Runs on one worker are serialised. `modules` takes the shipped modules only, by object or by name (`'random'`); `now` is not available in a worker.
+
 ### `generateToolsPrompt(tools, options?)`
 
 Produces a system-prompt fragment describing available tools, for use with Claude / other LLMs. Takes the same `tools` object as `createInterpreter`. A plain function renders as `name(a, b)` from its parameter names; a spec renders types, defaults and per-argument descriptions. Tools sharing a `group` render under a `##` section heading (useful past ~10 tools); `{ includeLanguageNotes: true }` appends a short description of the supported Python subset so hosts don't each hand-write it. The notes also tell the model to join two lists through a dict, because a nested-loop join over a few thousand rows runs into `maxIterations`.
@@ -364,6 +380,7 @@ source code ──► lexer ──► parser ──► compiler ──► VM ─
 - `src/json.ts`, `src/itertools.ts`, `src/collections.ts`, `src/functools.ts`, `src/string.ts`, `src/random.ts` — the optional modules, each its own entry point
 - `src/errors.ts` — the exception classes
 - `src/tools.ts` — the `tools` option: forms, argument resolution, prompt signatures
+- `src/worker.ts`, `src/worker-thread.ts` — `defanged/worker`: the interpreter in a thread, tools proxied to the host
 - `src/interpreter.ts` — the public `Interpreter`: options, tools, `run()`
 
 A Python call pushes a frame on the VM's own stack instead of recursing in JS. That is what lets a tool call pause the whole script on a promise from anywhere (inside a comprehension, a generator, a `sorted` key function), and what turns runaway recursion into a `RecursionError` instead of a crashed host. The one place JS does nest is a built-in calling back into Python, and the VM caps that at 100 levels.

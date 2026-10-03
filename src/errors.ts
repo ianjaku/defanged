@@ -166,3 +166,26 @@ export const EXCEPTION_CLASSES: (typeof InterpreterError)[] = [
   ModuleNotFoundError, MemoryError, RuntimeError, RecursionError,
   NotImplementedError, ToolError,
 ];
+
+/** An error flattened for a thread or process boundary, and back. */
+export interface ErrorData {
+  name: string;
+  message: string;
+  line: number;
+  column: number;
+}
+
+export function errorToData(error: InterpreterError): ErrorData {
+  return { name: (error.constructor as typeof InterpreterError).pyName, message: error.baseMessage, line: error.line, column: error.column };
+}
+
+/** Rebuilds an error of the right class, so `instanceof` and `except` still
+ *  work on the other side. Unknown names become a plain InterpreterError. */
+export function errorFromData(data: ErrorData): InterpreterError {
+  const classes = [...EXCEPTION_CLASSES, MaxIterationsError, TimeoutError, CancelledError];
+  const cls = classes.find((c) => c.pyName === data.name) ?? InterpreterError;
+  const error = new InterpreterError(data.message, data.line, data.column);
+  Object.setPrototypeOf(error, cls.prototype);
+  error.name = cls === InterpreterError ? 'InterpreterError' : data.name;
+  return error;
+}

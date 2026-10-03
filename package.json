@@ -56,6 +56,10 @@
     "./random": {
       "types": "./dist/random.d.ts",
       "import": "./dist/random.js"
+    },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "import": "./dist/worker.js"
     }
   },
   "files": [
@@ -68,7 +72,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts ./src/json.ts ./src/itertools.ts ./src/collections.ts ./src/functools.ts ./src/string.ts ./src/random.ts --outdir ./dist --target node --format esm --splitting && tsc --emitDeclarationOnly --declaration --outDir dist",
+    "build": "bun build ./src/index.ts ./src/json.ts ./src/itertools.ts ./src/collections.ts ./src/functools.ts ./src/string.ts ./src/random.ts ./src/worker.ts ./src/worker-thread.ts --outdir ./dist --root ./src --target node --format esm --splitting && tsc --emitDeclarationOnly --declaration --outDir dist",
     "test": "bun test",
     "test:features": "bun test tests/features.test.ts",
     "bench": "bun benchmarks/run.ts",
