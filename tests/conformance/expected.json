@@ -119,6 +119,10 @@
    "error": null,
    "stdout": "1,234.50 00101010    x 50.000000% FF\n1 2 a b a Ada is 36\n    a|1,234.50|25.0% 002.3 's'\n1 v x   | {}\n"
   },
+  "frozenset": {
+   "error": null,
+   "stdout": "[1, 2, 3] ['a', 'b'] frozenset() frozenset({1}) 3 True False True True True True False frozenset frozenset({'x'})\n[1, 2, 3, 4] [1, 2] [2, 3] [2, 3, 9] [1, 2, 3, 4] set frozenset [1, 2, 3, 7] frozenset() [2, 3] [1, 2, 9] True True True True True False True frozenset\npair empty True 1 True frozenset({frozenset({1})}) True True set [1] True False False\n2 [[1, 2], [3]]\n[1, 2] frozenset\nAttributeError 'frozenset' object has no attribute 'add'\nAttributeError 'frozenset' object has no attribute 'remove'\nAttributeError 'frozenset' object has no attribute 'pop'\nAttributeError 'frozenset' object has no attribute 'clear'\nAttributeError 'frozenset' object has no attribute 'update'\nTypeError cannot use 'list' as a set element (unhashable type: 'list')\nTypeError frozenset expected at most 1 argument, got 2\nTypeError 'int' object is not iterable\n"
+  },
   "function arguments": {
    "error": null,
    "stdout": "(1, 2, (), 3, 4, {}) (1, 2, (3, 4), 5, 4, {'e': 6}) (1, 2, (), 2, 4, {}) (1, 2, (), 9, 0, {'z': 1})\n6 6\naa bbb h (1, 2, (), {'z': 3})\n0\n"

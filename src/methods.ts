@@ -14,9 +14,9 @@ import { strFormat } from './format';
 import { PyFloat, bitLength, isIntLike } from './numbers';
 import { asIndex, getItem, objectOrder } from './ops';
 import {
-  DONE, Kwargs, MA, PyBuiltin, PyDate, PyDateTime, PyDict, PyDictView, PyFunction, PyGenerator, PyList,
+  DONE, Kwargs, MA, PyBuiltin, PyDate, PyDateTime, PyDict, PyDictView, PyFrozenSet, PyFunction, PyGenerator, PyList,
   PyModule, PyObject, PySet, PyTimeDelta, PyTuple, PyType, PyValue, Runtime,
-  T_DICT, T_LIST, T_SET, T_STR, T_TUPLE,
+  T_DICT, T_FROZENSET, T_LIST, T_SET, T_STR, T_TUPLE,
   copyDict, copySet, dictDelete, dictGet, dictSet, hashKey, isAstral, isSubset, keyError, pySetFrom, sameOrEqual,
   setAdd, sortCompare, strChars, strLength, andThen, typeName, typeOf,
 } from './values';
@@ -750,7 +750,7 @@ function combine(kind: 'union' | 'intersection' | 'difference' | 'symmetric', ba
     } else if (kind === 'difference') {
       for (const k of other.map.keys()) result.map.delete(k);
     } else {
-      const next = new PySet();
+      const next = result instanceof PyFrozenSet ? new PyFrozenSet() : new PySet();
       for (const [k, v] of result.map) if (!other.map.has(k)) next.map.set(k, v);
       for (const [k, v] of other.map) if (!result.map.has(k)) next.map.set(k, v);
       result = next;
@@ -813,6 +813,18 @@ const SET: MethodTable = Object.assign(Object.create(null), {
   }),
 } satisfies MethodTable);
 
+/** The set methods that do not mutate; `copy` returns the frozenset itself. */
+const FROZENSET: MethodTable = Object.assign(Object.create(null), {
+  copy: nullary('copy', (set: PySet) => set),
+  union: SET.union,
+  intersection: SET.intersection,
+  difference: SET.difference,
+  symmetric_difference: SET.symmetric_difference,
+  issubset: SET.issubset,
+  issuperset: SET.issuperset,
+  isdisjoint: SET.isdisjoint,
+} satisfies MethodTable);
+
 // ── Lookup ──────────────────────────────────────────────────────────────────
 
 /** The method table entry for `obj.name`, when obj is a built-in container or str. */
@@ -824,13 +836,13 @@ export function findMethod(obj: PyValue, name: string): Method | undefined {
     if (extra !== null && Object.hasOwn(extra, name)) return extra[name] as Method;
     return DICT[name];
   }
-  if (obj instanceof PySet) return SET[name];
+  if (obj instanceof PySet) return obj instanceof PyFrozenSet ? FROZENSET[name] : SET[name];
   if (obj instanceof PyTuple) return TUPLE[name];
   return undefined;
 }
 
 const TYPE_METHODS = new Map<PyType, MethodTable>([
-  [T_STR, STR], [T_LIST, LIST], [T_DICT, DICT], [T_SET, SET], [T_TUPLE, TUPLE],
+  [T_STR, STR], [T_LIST, LIST], [T_DICT, DICT], [T_SET, SET], [T_FROZENSET, FROZENSET], [T_TUPLE, TUPLE],
 ]);
 
 const STATIC_METHODS = new Map<PyType, Record<string, PyBuiltin>>([

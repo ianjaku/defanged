@@ -14,9 +14,9 @@ import {
 import { asIndex, binary, ordered } from './ops';
 import {
   DONE, Done, ELLIPSIS, Kwargs, MA, NativeFn, PyBuiltin, PyDict, PyDictView, PyFunction, PyGenerator, PyObject,
-  PyIterator, PyList, PyRange, PySet, PySlice, PyTimeDelta, PyTuple, PyType, PyValue, Runtime, SeqIterator,
-  T_BOOL, T_DICT, T_FLOAT, T_INT, T_LIST, T_NONE, T_RANGE, T_SET, T_SLICE, T_STR, T_TUPLE, T_TYPE,
-  dictGet, exceptionType, hashKey, identityOf, pyRepr, pySetFrom, pyStr, strChars, strLength,
+  PyFrozenSet, PyIterator, PyList, PyRange, PySet, PySlice, PyTimeDelta, PyTuple, PyType, PyValue, Runtime, SeqIterator,
+  T_BOOL, T_DICT, T_FLOAT, T_FROZENSET, T_INT, T_LIST, T_NONE, T_RANGE, T_SET, T_SLICE, T_STR, T_TUPLE, T_TYPE,
+  dictGet, exceptionType, hashKey, identityOf, pyRepr, pySetFrom, pyStr, setAdd, strChars, strLength,
   andThen, truthy, typeName, typeOf, valueToJs,
 } from './values';
 import { BinOp } from './vm';
@@ -47,6 +47,11 @@ export interface BuiltinCallbacks {
 }
 
 // ── Argument helpers ────────────────────────────────────────────────────────
+
+/** The container constructors word their arity error without parentheses. */
+function atMostOne(name: string, args: PyValue[]): void {
+  if (args.length > 1) throw new TypeError(`${name} expected at most 1 argument, got ${args.length}`);
+}
 
 function onlyKeywords(name: string, kwargs: Kwargs, allowed: string[]): void {
   if (kwargs === null) return;
@@ -390,24 +395,34 @@ export function createBuiltins(callbacks: BuiltinCallbacks = {}): Map<string, Py
     return args.length === 0 ? '' : pyStr(args[0]);
   });
   type(T_LIST, (rt, args) => {
-    arity('list', args, 0, 1);
+    atMostOne('list', args);
     if (args.length === 0) return new PyList([]);
     return andThen(rt.collect(args[0]), (items) => new PyList(items.slice()));
   });
   type(T_TUPLE, (rt, args) => {
-    arity('tuple', args, 0, 1);
+    atMostOne('tuple', args);
     if (args.length === 0) return new PyTuple([]);
     // A plain tuple is returned as is; a namedtuple becomes a plain tuple.
     if (args[0] instanceof PyTuple && args[0].constructor === PyTuple) return args[0];
     return andThen(rt.collect(args[0]), (items) => new PyTuple(items.slice()));
   });
   type(T_SET, (rt, args) => {
-    arity('set', args, 0, 1);
+    atMostOne('set', args);
     if (args.length === 0) return new PySet();
     return andThen(rt.collect(args[0]), (items) => pySetFrom(items));
   });
+  type(T_FROZENSET, (rt, args) => {
+    atMostOne('frozenset', args);
+    if (args.length === 0) return new PyFrozenSet();
+    if (args[0] instanceof PyFrozenSet) return args[0];
+    return andThen(rt.collect(args[0]), (items) => {
+      const out = new PyFrozenSet();
+      for (const item of items) setAdd(out, item);
+      return out;
+    });
+  });
   type(T_DICT, (rt, args, kwargs) => {
-    arity('dict', args, 0, 1);
+    atMostOne('dict', args);
     const dict = new PyDict();
     return andThen(dictUpdate(rt, dict, args[0], kwargs), () => dict);
   }, true);

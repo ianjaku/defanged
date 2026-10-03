@@ -1171,6 +1171,24 @@ try:
 except AttributeError as e:
     print(e)
 `),
+  c('frozenset', py`
+a = frozenset([3, 1, 2, 1])
+b = frozenset("ab")
+print(sorted(a), sorted(b), frozenset(), frozenset([1]), len(a), 2 in a, 5 in a, a == {1, 2, 3}, {1, 2, 3} == a, a == frozenset({2, 1, 3}), a != b, bool(frozenset()), type(a).__name__, repr(frozenset("x")))
+print(sorted(a | {4}), sorted(a & {1, 2, 9}), sorted(a - {1}), sorted(a ^ {1, 9}), sorted({4} | a), type({4} | a).__name__, type(a | {4}).__name__, sorted(a.union([7])), a.intersection(b), sorted(a.difference({1})), sorted(a.symmetric_difference({3, 9})), a.copy() is a, a.issubset({1, 2, 3, 4}), a.issuperset({1}), a.isdisjoint(b), a <= {1, 2, 3}, a < {1, 2, 3}, a >= frozenset([1]), type(a.union([7])).__name__)
+d = {frozenset([1, 2]): "pair", frozenset(): "empty"}
+print(d[frozenset([2, 1])], d[frozenset()], {frozenset([1]), frozenset([1]), frozenset([2])} == {frozenset([2]), frozenset([1])}, len({frozenset([1, 2]), frozenset([2, 1])}), hash(frozenset([1, 2])) == hash(frozenset([2, 1])), frozenset([frozenset([1])]), frozenset(a) is a, set(a) == {1, 2, 3}, type(set(a)).__name__, list(frozenset([1])), isinstance(a, frozenset), isinstance(a, set), isinstance({1}, frozenset))
+pairs = {frozenset((r["a"], r["b"])) for r in [{"a": 1, "b": 2}, {"a": 2, "b": 1}, {"a": 3, "b": 3}]}
+print(len(pairs), sorted(sorted(p) for p in pairs))
+fs = frozenset([1])
+fs |= {2}
+print(sorted(fs), type(fs).__name__)
+for bad in [lambda: a.add(4), lambda: a.remove(1), lambda: a.pop(), lambda: a.clear(), lambda: a.update([1]), lambda: frozenset([[1]]), lambda: frozenset(1, 2), lambda: frozenset(5)]:
+    try:
+        print(bad())
+    except (AttributeError, TypeError) as e:
+        print(type(e).__name__, e)
+`),
   c('functools', py`
 import functools
 from functools import reduce, partial, lru_cache, cache, cmp_to_key, wraps

@@ -134,7 +134,7 @@ A quick overview — see [`FEATURES.md`](./FEATURES.md) for the authoritative li
 
 - Numbers the way CPython has them. `int` is exact at any size (`2 ** 100` prints all 31 digits), `float` is a separate type (`6 / 2` is `3.0`), and `bool` is an `int`.
 - Strings with full escape sequences, raw strings (`r"\d+"`), f-strings (format specs such as `:,.2f` and `:.1%`, `!r`, `{x=}`, nested `{width}`), `%` formatting and `str.format`.
-- Lists, tuples, dicts and sets. Dict keys and set members can be any hashable value, so `totals[(month, org)]` works. `zip`, `enumerate` and `dict.items()` yield real tuples.
+- Lists, tuples, dicts, sets and frozensets. Dict keys and set members can be any hashable value, so `totals[(month, org)]` works. `zip`, `enumerate` and `dict.items()` yield real tuples.
 - Comprehensions and generator expressions, slicing, `*` and `**` unpacking in calls and literals.
 - `if`/`elif`/`else`, `for`/`while` with `else`, `break`/`continue`/`pass`, `try`/`except`/`else`/`finally`, `raise`, `assert`, `del`, the walrus `:=`, one-line bodies (`if x: return 1`).
 - Functions with defaults, `*args`/`**kwargs`, keyword-only parameters, closures, `global`/`nonlocal`, lambdas, decorators. Type annotations parse and are ignored.

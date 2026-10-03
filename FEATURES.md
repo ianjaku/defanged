@@ -254,6 +254,8 @@ s.add(x), s.remove(x), s.issubset(t), ...
 ```
 Members can be any hashable value (same rules as dict keys, tuples included). Like `new Set()` in TS, except membership is by value — `(1, 2)` equals `(1, 2)` — not by reference.
 
+`frozenset` is the immutable kind: the same operators, methods and comparisons, no `add`/`remove`/`update`, and it is hashable, so `{frozenset(pair) for pair in edges}` deduplicates unordered pairs and a frozenset can be a dict key. Operators return the left operand's kind (`frozenset | set` is a frozenset), `fs |= s` rebinds to a new frozenset, and `frozenset(fs)` returns `fs` itself, as in CPython.
+
 ### Multiline strings
 Triple-quoted strings work: `"""multi\nline"""`.
 

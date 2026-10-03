@@ -77,6 +77,13 @@ export class PySet {
   map = new Map<HashKey, PyValue>();
 }
 
+/** An immutable set: every set operation applies, the mutating methods do
+ *  not exist, and it can be a dict key or a set member. */
+export class PyFrozenSet extends PySet {
+  /** Its dict/set key once computed; members never change. */
+  hash: HashKey | undefined = undefined;
+}
+
 export class PyRange {
   constructor(public readonly start: number, public readonly stop: number, public readonly step: number) {}
 
@@ -296,6 +303,7 @@ export const T_LIST = new PyType('list');
 export const T_TUPLE = new PyType('tuple');
 export const T_DICT = new PyType('dict');
 export const T_SET = new PyType('set');
+export const T_FROZENSET = new PyType('frozenset');
 export const T_RANGE = new PyType('range');
 export const T_SLICE = new PyType('slice');
 export const T_FUNCTION = new PyType('function');
@@ -344,7 +352,7 @@ export function typeOf(v: PyValue): PyType {
   if (v instanceof PyList) return T_LIST;
   if (v instanceof PyTuple) return v.pyType;
   if (v instanceof PyDict) return v.pyType;
-  if (v instanceof PySet) return T_SET;
+  if (v instanceof PySet) return v instanceof PyFrozenSet ? T_FROZENSET : T_SET;
   if (v instanceof PyFunction) return T_FUNCTION;
   if (v instanceof PyBuiltin) return T_BUILTIN;
   if (v instanceof PyRange) return T_RANGE;
@@ -553,6 +561,18 @@ export function hashKey(v: PyValue, usage?: 'dict key' | 'set element'): HashKey
   if (v instanceof PyDate) return `\x00d${v.year}-${v.month}-${v.day}`;
   if (v instanceof PyTimeDelta) return `\x00td${v.days}:${v.seconds}:${v.microseconds}`;
   if (v instanceof PyRange) return `\x00r${v.start}:${v.stop}:${v.step}`;
+  if (v instanceof PyFrozenSet) {
+    if (v.hash !== undefined) return v.hash;
+    // Members are encoded like tuple items, then sorted, so insertion order
+    // does not matter: frozenset({1, 2}) and frozenset({2, 1}) share a key.
+    const parts: string[] = [];
+    for (const k of v.map.keys()) {
+      const part = typeof k === 'number' ? '#' + k : 's' + k;
+      parts.push(part.length + ':' + part);
+    }
+    parts.sort();
+    return (v.hash = '\x00f' + parts.join(''));
+  }
   if (v instanceof PyList || v instanceof PyDict || v instanceof PySet || v instanceof PySlice || v instanceof PyDictView) {
     const name = typeName(v);
     throw new TypeError(usage
@@ -595,8 +615,9 @@ export function copyDict(d: PyDict): PyDict {
   return copy;
 }
 
+/** A copy of the same kind: a frozenset copies to a frozenset. */
 export function copySet(s: PySet): PySet {
-  const copy = new PySet();
+  const copy = s instanceof PyFrozenSet ? new PyFrozenSet() : new PySet();
   for (const [hk, member] of s.map) copy.map.set(hk, member);
   return copy;
 }
@@ -759,7 +780,8 @@ function reprOf(v: PyValue, seen: Set<object>): string {
       for (const [k, val] of v.map.values()) parts.push(`${reprOf(k, seen)}: ${reprOf(val, seen)}`);
       out = v.reprWith(`{${parts.join(', ')}}`);
     } else {
-      out = v.map.size === 0 ? 'set()' : `{${joinRepr(Array.from(v.map.values()), seen)}}`;
+      const inner = v.map.size === 0 ? '' : `{${joinRepr(Array.from(v.map.values()), seen)}}`;
+      out = v instanceof PyFrozenSet ? `frozenset(${inner})` : inner || 'set()';
     }
     seen.delete(v);
     return out;

@@ -9,7 +9,7 @@ import { IndexError, OverflowError, TypeError, ValueError } from './errors';
 import { percentFormat } from './format';
 import { PyFloat, intInvert, intNeg, isIntLike, isNum, numBinary } from './numbers';
 import {
-  MA, OrderOp, PyDict, PyDictView, PyGenerator, PyIterator, PyList, PyObject, PyRange, PySet,
+  MA, OrderOp, PyDict, PyDictView, PyFrozenSet, PyGenerator, PyIterator, PyList, PyObject, PyRange, PySet,
   PySlice, PyTimeDelta, PyTuple, PyValue, Runtime,
   copyDict, dictDelete, dictGet, dictHas, dictSet, isAstral, keyError, orderResult, pyCompare, pyEquals, pyIs,
   pySetFrom, sameOrEqual, setHas, strChars, andThen, typeName,
@@ -227,8 +227,9 @@ function asSet(v: PyValue): PySet | undefined {
   return undefined;
 }
 
+/** The result takes the left operand's kind, as in CPython. */
 function setOperation(op: BinOp, a: PySet, b: PySet): PySet | undefined {
-  const out = new PySet();
+  const out = a instanceof PyFrozenSet ? new PyFrozenSet() : new PySet();
   switch (op) {
     case BinOp.OR:
       for (const [k, v] of a.map) out.map.set(k, v);
@@ -376,7 +377,7 @@ export function inplace(rt: Runtime, op: BinOp, a: PyValue, b: PyValue): MA<PyVa
       a.items = repeatItems(rt, a.items, b);
       return a;
     }
-  } else if (a instanceof PySet && b instanceof PySet) {
+  } else if (a instanceof PySet && b instanceof PySet && !(a instanceof PyFrozenSet)) {
     const r = setOperation(op, a, b);
     if (r) {
       a.map = r.map;
