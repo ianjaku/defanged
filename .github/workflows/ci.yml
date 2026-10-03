@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly: a CPython point release that changes a message shows up here, not in a user report.
+    - cron: "17 6 * * 1"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test
+      - run: bun run build
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Built package runs under Node
+        run: node tests/smoke.mjs
+
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: bun install --frozen-lockfile
+      - name: Conformance corpus still matches this CPython
+        run: |
+          PYTHON=python3 bun run conformance:record
+          git diff --exit-code tests/conformance/expected.json
+      - name: Random programs against CPython
+        run: PYTHON=python3 bun run fuzz --count 400 --seed ${{ github.run_number }}

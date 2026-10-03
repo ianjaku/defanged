@@ -12,6 +12,7 @@ import { runPython } from "defanged";
 await runPython(`sum(x * x for x in range(10))`); // 285
 ```
 
+[![CI](https://github.com/ianjaku/defanged/actions/workflows/ci.yml/badge.svg)](https://github.com/ianjaku/defanged/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/defanged.svg)](https://www.npmjs.com/package/defanged)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![typescript](https://img.shields.io/badge/typescript-5.x-blue.svg)](https://www.typescriptlang.org/)
