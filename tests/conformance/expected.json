@@ -279,6 +279,10 @@
    },
    "stdout": "%d format: a real number is required, not str\nnot enough arguments for format string\n"
   },
+  "pow with a modulus": {
+   "error": null,
+   "stdout": "-6 -5 -6 -3 -6 6 1 0 0 976371285 4 -6\nValueError pow() 3rd argument cannot be 0\nValueError base is not invertible for the given modulus\nTypeError pow() 3rd argument not allowed unless all arguments are integers\nTypeError unsupported operand type(s) for ** or pow(): 'str', 'int', 'int'\nTypeError unsupported operand type(s) for ** or pow(): 'int', 'int', 'str'\n"
+  },
   "power": {
    "error": null,
    "stdout": "1024 1.4142135623730951 2.0 0.25 -8 1 0.1\n1024 24 5\n-4 512\n"

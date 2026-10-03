@@ -26,6 +26,7 @@ The README's "Not supported" table gives the rationale for the deliberate gaps. 
 - `gen.throw()`, `send()` through `yield from`, and running `finally` blocks of a generator that is dropped or closed half-way.
 - `range()` with bounds beyond 2^53 (raises `OverflowError`).
 - `\N{NAME}` string escapes (a syntax error that says to use `\uXXXX`).
+- Sorting a list of mixed types raises `TypeError` as in CPython, but the message may name a different pair of types: CPython's timsort and the JS sort meet their first incomparable pair in different orders.
 - `statistics.variance` and `stdev` use floating-point sums, so the last digit can differ from CPython's exact fractions. `mean` is exact.
 - Error positions count lines from the first non-blank line of the source.
 - Exception chaining: `raise X from Y` parses but `__cause__` is not kept.

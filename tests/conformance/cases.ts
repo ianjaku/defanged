@@ -1189,6 +1189,14 @@ for bad in [lambda: a.add(4), lambda: a.remove(1), lambda: a.pop(), lambda: a.cl
     except (AttributeError, TypeError) as e:
         print(type(e).__name__, e)
 `),
+  c('pow with a modulus', py`
+print(pow(1, 1, -7), pow(3, 2, -7), pow(-3, 3, -7), pow(2, -1, -7), pow(0, 0, -7), pow(5, 3, 7), pow(-5, 3, 7), pow(7, 2, -1), pow(2, 10, 1), pow(2, 100, 10 ** 9 + 7), pow(3, -1, 11), pow(True, 1, -7))
+for bad in [lambda: pow(2, 2, 0), lambda: pow(2, -1, 4), lambda: pow(2.0, 2, 3), lambda: pow("a", 1, 1), lambda: pow(2, 3, "a")]:
+    try:
+        print(bad())
+    except (ValueError, TypeError) as e:
+        print(type(e).__name__, e)
+`),
   c('functools', py`
 import functools
 from functools import reduce, partial, lru_cache, cache, cmp_to_key, wraps

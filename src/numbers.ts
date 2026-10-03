@@ -172,15 +172,16 @@ export function intPowMod(a: PyInt, b: PyInt, m: PyInt): PyInt {
     base = s0;
     exp = -exp;
   }
-  let result = 1n;
-  base = ((base % mod) + mod) % mod;
+  // Work with |m|, then give the result the sign of m, as Python's % does.
+  const am = mod < 0n ? -mod : mod;
+  let result = 1n % am;
+  base = ((base % am) + am) % am;
   while (exp > 0n) {
-    if (exp & 1n) result = (result * base) % mod;
-    base = (base * base) % mod;
+    if (exp & 1n) result = (result * base) % am;
+    base = (base * base) % am;
     exp >>= 1n;
   }
-  result = ((result % mod) + mod) % mod;
-  if (mod < 0n && result !== 0n) result += mod;
+  if (mod < 0n && result !== 0n) result -= am;
   return normBig(result);
 }
 
