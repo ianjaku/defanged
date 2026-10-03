@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { createInterpreter, ToolDefinition, generateToolsPrompt, runPython, tool } from '../src';
 import { parameterNames } from '../src/tools';
+import { z } from 'zod';
 
 describe('Tool Injection', () => {
   describe('Basic Tool Calls', () => {
@@ -816,6 +817,37 @@ describe('Tools with params', () => {
 
   test('a tool entry must be a function or have a handler', () => {
     expect(() => createInterpreter({ tools: { bad: { params: {} } as any } })).toThrow("Tool 'bad' must be a function or an object with a handler function");
+  });
+});
+
+describe('Tools with schemas', () => {
+  const report = z.object({ title: z.string(), rows: z.array(z.number()).default([]) });
+  const it = createInterpreter({
+    tools: {
+      save: tool({
+        params: { report, format: { type: 'str', schema: z.enum(['pdf', 'html']), default: 'pdf' }, when: 'str?' },
+        handler: ({ report, format, when }) => ({ title: report.title.toUpperCase(), rows: report.rows, format, when }),
+      }),
+      slow: { params: { n: { schema: { '~standard': { version: 1, vendor: 'test', validate: async (v: unknown) => (typeof v === 'number' ? { value: v * 2 } : { issues: [{ message: 'not a number' }] }) } } } }, handler: ({ n }: any) => n },
+    },
+  });
+
+  test('valid values pass through, transformed by the schema', async () => {
+    expect(await it.run('save({"title": "q1"})')).toEqual({ title: 'Q1', rows: [], format: 'pdf', when: null });
+    expect(await it.run('save({"title": "q1", "rows": [1, 2]}, format="html")')).toEqual({ title: 'Q1', rows: [1, 2], format: 'html', when: null });
+    expect(await it.run('slow(21)')).toBe(42);
+  });
+
+  test('invalid values raise a catchable TypeError naming the argument and the path', async () => {
+    await expect(it.run('save({"rows": "x"})')).rejects.toThrow("save() argument 'report' is invalid: title: ");
+    await expect(it.run('save({"title": "a"}, format="docx")')).rejects.toThrow("save() argument 'format' is invalid: ");
+    expect(await it.run('try:\n    slow("x")\nexcept TypeError as e:\n    str(e)')).toBe("slow() argument 'n' is invalid: not a number");
+  });
+
+  test('a schema is not run for an argument that was not given', async () => {
+    const d = createInterpreter({ tools: { f: { params: { x: { schema: z.string() } }, handler: () => 'never' }, g: { params: { x: { schema: z.string(), default: 5 } }, handler: ({ x }: any) => x } } });
+    await expect(d.run('f()')).rejects.toThrow("f() missing 1 required argument: 'x'");
+    expect(await d.run('g()')).toBe(5);
   });
 });
 

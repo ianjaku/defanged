@@ -12,20 +12,38 @@
  */
 
 import { TypeError } from './errors';
-import { jsToValue, pyRepr, setOwn } from './values';
+import { MA, andThen, jsToValue, pyRepr, setOwn } from './values';
 
 // ── Public types ────────────────────────────────────────────────────────────
 
 /** Python type names a parameter can declare; shown to the model as-is. */
 export type ParamType = 'str' | 'int' | 'float' | 'bool' | 'list' | 'dict' | 'datetime' | 'any';
 
-/** A parameter: a type, `'int?'` for optional, or the long form with a
- *  description and a default. A default makes the parameter optional. */
-export type ParamSpec = ParamType | `${ParamType}?` | {
+/** The Standard Schema interface (standardschema.dev), which zod, valibot and
+ *  arktype implement; declared here so no dependency is needed. */
+export interface StandardSchemaV1<Input = unknown, Output = Input> {
+  readonly '~standard': {
+    readonly version: 1;
+    readonly vendor: string;
+    readonly validate: (value: unknown) => StandardResult<Output> | Promise<StandardResult<Output>>;
+    readonly types?: { readonly input: Input; readonly output: Output };
+  };
+}
+export type StandardResult<Output> =
+  | { readonly value: Output; readonly issues?: undefined }
+  | { readonly issues: ReadonlyArray<{ readonly message: string; readonly path?: ReadonlyArray<PropertyKey | { readonly key: PropertyKey }> }> };
+
+/** A parameter: a type, `'int?'` for optional, a schema, or the long form
+ *  with a description, a default and/or a schema. A default makes the
+ *  parameter optional. */
+export type ParamSpec = ParamType | `${ParamType}?` | StandardSchemaV1 | {
+  /** Shown to the model in the signature. */
   type?: ParamType;
   description?: string;
   /** A JS value, applied when the script leaves the argument out. */
   default?: unknown;
+  /** Validates (and may transform) the value before the handler runs. */
+  schema?: StandardSchemaV1;
 };
 
 type JsOf<T> = T extends 'str' ? string
@@ -36,8 +54,12 @@ type JsOf<T> = T extends 'str' ? string
   : T extends 'datetime' ? string
   : any;
 
+type OutputOf<S> = S extends StandardSchemaV1<any, infer O> ? O : any;
+
 type ParamJs<P> = P extends `${infer T}?` ? JsOf<T> | undefined
   : P extends string ? JsOf<P>
+  : P extends StandardSchemaV1 ? OutputOf<P>
+  : P extends { schema: infer S } ? OutputOf<S>
   : P extends { type: infer T } ? JsOf<T>
   : any;
 
@@ -93,6 +115,11 @@ export interface ParamInfo {
   hasDefault: boolean;
   default: unknown;
   optional: boolean;
+  schema: StandardSchemaV1 | null;
+}
+
+function isSchema(v: unknown): v is StandardSchemaV1 {
+  return typeof v === 'object' && v !== null && '~standard' in v;
 }
 
 export interface NormalizedTool {
@@ -111,13 +138,17 @@ function paramInfo(name: string, spec: ParamSpec): ParamInfo {
     const optional = spec.endsWith('?');
     return {
       name, type: optional ? spec.slice(0, -1) : spec, description: null,
-      defaultText: optional ? 'None' : null, hasDefault: false, default: undefined, optional,
+      defaultText: optional ? 'None' : null, hasDefault: false, default: undefined, optional, schema: null,
     };
+  }
+  if (isSchema(spec)) {
+    return { name, type: null, description: null, defaultText: null, hasDefault: false, default: undefined, optional: false, schema: spec };
   }
   const hasDefault = Object.hasOwn(spec, 'default');
   return {
     name, type: spec.type ?? null, description: spec.description ?? null,
     defaultText: hasDefault ? pyRepr(jsToValue(spec.default)) : null, hasDefault, default: spec.default, optional: hasDefault,
+    schema: spec.schema ?? null,
   };
 }
 
@@ -164,7 +195,7 @@ export function normalizeTools(tools: Tools | ToolDefinition[] | undefined): Nor
       group: t.group ?? null,
       params: (t.parameters ?? []).map((p) => ({
         name: p.name, type: p.type ?? null, description: p.description ?? null,
-        defaultText: p.default ?? null, hasDefault: false, default: undefined, optional: p.default !== undefined,
+        defaultText: p.default ?? null, hasDefault: false, default: undefined, optional: p.default !== undefined, schema: null,
       })),
       mode: 'legacy',
       fn: t.handler,
@@ -178,7 +209,7 @@ export function normalizeTools(tools: Tools | ToolDefinition[] | undefined): Nor
       out.push({
         name, description: null, group: null,
         params: (names ?? []).map((n) => ({
-          name: n, type: null, description: null, defaultText: null, hasDefault: false, default: undefined, optional: false,
+          name: n, type: null, description: null, defaultText: null, hasDefault: false, default: undefined, optional: false, schema: null,
         })),
         mode: names === null ? 'legacy' : 'positional',
         fn: entry,
@@ -203,10 +234,23 @@ export function normalizeTools(tools: Tools | ToolDefinition[] | undefined): Nor
 
 // ── Argument resolution ─────────────────────────────────────────────────────
 
+/** Runs a param's schema on the value; the result replaces it, so a schema
+ *  that transforms (zod defaults, coercion) is honoured. */
+function validate(tool: NormalizedTool, p: ParamInfo, value: unknown): MA<unknown> {
+  return andThen(p.schema!['~standard'].validate(value), (result) => {
+    if (result.issues === undefined) return result.value;
+    const detail = result.issues.map((issue) => {
+      const path = (issue.path ?? []).map((seg) => String(typeof seg === 'object' && seg !== null && 'key' in seg ? seg.key : seg)).join('.');
+      return path ? `${path}: ${issue.message}` : issue.message;
+    }).join('; ');
+    throw new TypeError(`${tool.name}() argument '${p.name}' is invalid: ${detail}`);
+  });
+}
+
 /** The JS arguments to call `tool.fn` with, from marshalled Python
  *  positional arguments and keywords. Raises a Python TypeError for calls a
  *  spec'd tool cannot accept, so the script (and the model) can correct it. */
-export function resolveArguments(tool: NormalizedTool, args: any[], kwargs: Record<string, any> | null): any[] {
+export function resolveArguments(tool: NormalizedTool, args: any[], kwargs: Record<string, any> | null): MA<any[]> {
   if (tool.mode === 'legacy') return [...args, kwargs ?? {}];
   const names = tool.params.map((p) => p.name);
 
@@ -235,7 +279,25 @@ export function resolveArguments(tool: NormalizedTool, args: any[], kwargs: Reco
       if (p.hasDefault) setOwn(obj, p.name, p.default);
       else if (!p.optional) throw new TypeError(`${tool.name}() missing 1 required argument: '${p.name}'`);
     }
-    return [obj];
+    // Only what the script passed is validated; a host's default is trusted.
+    const checks = tool.params.filter((p) => p.schema !== null && seen.has(p.name));
+    if (checks.length === 0) return [obj];
+    const run = (i: number): MA<any[]> => {
+      for (; i < checks.length; i++) {
+        const p = checks[i];
+        const r = validate(tool, p, obj[p.name]);
+        if (r instanceof Promise) {
+          const at = i;
+          return r.then((v) => {
+            setOwn(obj, p.name, v);
+            return run(at + 1);
+          });
+        }
+        setOwn(obj, p.name, r);
+      }
+      return [obj];
+    };
+    return run(0);
   }
 
   // Positional: keywords land in the slot named like them; the rest fill the

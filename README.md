@@ -280,7 +280,21 @@ createInterpreter({
 
 **Specs.** `params` maps each parameter name to a type (`'str'`, `'int'`, `'float'`, `'bool'`, `'list'`, `'dict'`, `'datetime'`, `'any'`), a type with `?` for optional, or `{ type?, description?, default? }`. A `default` is a JS value and makes the parameter optional. The handler always receives one object keyed by parameter name, however the script called the tool, with defaults filled in. Calls the spec cannot accept raise a Python `TypeError` the script can catch, with CPython's wording: `create_report() missing 1 required argument: 'report'`, `got an unexpected keyword argument 'x'`, `takes 3 positional arguments but 4 were given`.
 
-Wrap a spec in `tool()` to type the handler from its `params`:
+**Validation.** A param can carry a schema from any library that implements [Standard Schema](https://standardschema.dev) (zod, valibot, arktype), either on its own or as `schema` in the long form next to the display `type`. The value the script passed is validated before the handler runs; the schema's output replaces it, so zod defaults and coercions apply; and a failure raises a Python `TypeError` naming the argument and the path, which the model can read and fix: `save() argument 'report' is invalid: title: Invalid input: expected string, received undefined`. Defaults you set on the param are trusted and skip the schema.
+
+```typescript
+import { z } from "zod";
+
+save: tool({
+  params: {
+    report: z.object({ title: z.string(), rows: z.array(z.number()).default([]) }),
+    format: { type: "str", schema: z.enum(["pdf", "html"]), default: "pdf" },
+  },
+  handler: ({ report, format }) => store(report, format), // report.rows: number[], format: "pdf" | "html"
+}),
+```
+
+Wrap a spec in `tool()` to type the handler from its `params`, schemas included:
 
 ```typescript
 import { tool } from "defanged";

@@ -133,7 +133,7 @@ export class Interpreter {
         for (const [key, value] of kwargs) setOwn(keywords, key, valueToJs(value));
       }
       // Argument errors are the script's fault, so they stay Python TypeErrors.
-      const jsArgs = resolveArguments(tool, args.map((arg) => valueToJs(arg)), keywords);
+      const jsArgs = await resolveArguments(tool, args.map((arg) => valueToJs(arg)), keywords);
       let result: any;
       try {
         result = await tool.fn(...jsArgs);

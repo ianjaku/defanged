@@ -10,7 +10,7 @@ export { parse, Parser } from './parser';
 export { createInterpreter, Interpreter } from './interpreter';
 export type { InterpreterOptions, ResourceLimits } from './interpreter';
 export { tool } from './tools';
-export type { Tools, ToolSpec, ToolFunction, ParamSpec, ParamType, ArgsOf, ToolDefinition, ToolParameter } from './tools';
+export type { Tools, ToolSpec, ToolFunction, ParamSpec, ParamType, ArgsOf, StandardSchemaV1, ToolDefinition, ToolParameter } from './tools';
 
 // Re-export types
 export * from './tokens';
