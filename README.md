@@ -367,9 +367,19 @@ Three things keep that cheap, and they are worth knowing when you write tools:
 
 ---
 
-## Upgrading from 0.3
+## What changed in 1.0
 
-0.4 replaces the interpreter's runtime to match CPython much more closely. Scripts that relied on the old differences will behave differently:
+1.0 is a new interpreter under the same name. Since 0.3:
+
+- **A bytecode VM instead of a tree walker.** Scripts run 2 to 4 times faster, Python calls no longer use the JS stack, and a tool call pauses the script instead of threading promises through every expression. See "Performance".
+- **CPython's behaviour, checked against CPython.** Exact ints, a separate `float`, exception objects, CPython's error messages. Part of the test suite is a corpus of programs whose expected output was recorded from CPython 3.14.
+- **Tools are an object of functions.** `tools: { fetch: (quarter) => ... }`, with keyword arguments matched to parameter names, and an optional `{ params, handler }` spec for typed, documented tools. See "Tools".
+- **Six optional modules.** `json`, `itertools`, `collections`, `functools`, `string` and `random`, each its own entry point so the core bundle stays at 54 KB min+gzip. See "Optional modules".
+- **Limits you can rely on.** `timeoutMs` covers time spent inside tool calls, `maxIterations` also counts function calls, and strings and collections have size caps that raise a catchable `MemoryError`.
+
+### Upgrading from 0.3
+
+Scripts that relied on the old runtime's differences from CPython will behave differently:
 
 - `6 / 2` is `3.0` and prints that way. Integers are exact at any size.
 - `except E as e` binds an exception object. `"error: " + e` is a `TypeError`; use `str(e)` or an f-string.
@@ -378,27 +388,7 @@ Three things keep that cheap, and they are worth knowing when you write tools:
 - `maxIterations` now also caps the number of function calls, and `finally` blocks no longer run when `MaxIterationsError` or `TimeoutError` ends a script.
 - `sorted(..., reverse=True)` keeps equal items in their original order, as CPython does.
 
-For hosts: `tools` is now an object keyed by tool name (`{ fetch: (q) => ... }`) and keyword arguments reach a plain function's parameters by name; see "Tools". The 0.3 array of `{ name, handler }` still works with its old convention, so nothing breaks, but the `ToolDefinition` type is only kept for it. `runPython`, `createInterpreter` and the exported error classes are unchanged. Two things changed for code that reached into internals: the constructor arguments of `NameError`, `KeyError` and `ZeroDivisionError`, and the exported value types (the old tagged objects such as `PyNumber` and the `Environment` class are gone).
-
----
-
-## Development
-
-```bash
-bun install             # install devDependencies
-bun test                # run the full suite
-bun run test:features   # run the behavioral feature suite
-bun run typecheck       # tsc --noEmit
-bun run build           # emit dist/
-bun bench               # performance benchmarks
-```
-
-`tests/conformance/cases.ts` holds small Python programs. `bun run conformance:record` runs them in a real CPython (set `PYTHON=python3.14` to pick one) and saves what it printed, and `bun test` then checks that defanged prints the same. Add a case there whenever you find a difference.
-
-Contributions welcome. Two rules:
-
-1. **Never add a capability that widens the safety boundary.** No module system, no `exec`, no filesystem, no network. If you want to expose something to Python code, add it as a tool, not as a built-in.
-2. **Match CPython behavior.** When in doubt, open a real Python REPL and observe. The test suite is the spec, and the conformance corpus is the part of it that CPython wrote.
+For hosts: `tools` is now an object keyed by tool name, and keyword arguments reach a plain function's parameters by name; see "Tools". The 0.3 array of `{ name, handler }` still works with its old convention, so nothing breaks, but the `ToolDefinition` type is only kept for it. `runPython`, `createInterpreter` and the exported error classes are unchanged. Two things changed for code that reached into internals: the constructor arguments of `NameError`, `KeyError` and `ZeroDivisionError`, and the exported value types (the old tagged objects such as `PyNumber` and the `Environment` class are gone).
 
 ---
 
@@ -409,7 +399,7 @@ A substantial portion of this codebase was written with the help of Claude. I'm 
 **A Python interpreter is a black box with a very well-defined contract.** The contract is "behave like CPython for the supported subset." That contract is:
 
 - **Externally specified.** Python's semantics are documented, tested, and can be verified against a reference implementation that ships with every major OS. If `defanged` says `int(-3.9) == -3`, I can check that in a real Python REPL in five seconds.
-- **Mechanically testable.** Every behavioral claim is a unit test. Given input X, produce output Y. There is very little room for "it works but it's subtly wrong" in a way that tests wouldn't catch — and when there is, the right fix is to add a test, not to re-audit the code by hand. Since 0.4 part of the suite is written by CPython itself: a corpus of programs is run through the real interpreter and its recorded output is what `bun test` compares against.
+- **Mechanically testable.** Every behavioral claim is a unit test. Given input X, produce output Y. There is very little room for "it works but it's subtly wrong" in a way that tests wouldn't catch — and when there is, the right fix is to add a test, not to re-audit the code by hand. Since 1.0 part of the suite is written by CPython itself: a corpus of programs is run through the real interpreter and its recorded output is what `bun test` compares against.
 - **Narrowly scoped.** The code does one thing: interpret a stream of Python tokens and produce values. It does not make network calls, write to disk, or interact with shared state. The blast radius of a bug is "the code returns the wrong answer," not "the code leaks user data."
 
 For projects like this — interpreters, parsers, codecs, protocol implementations, math libraries, anything with a reference spec and deterministic I/O — I believe the honest engineering question is not "who typed this?" but "is the behavior correct, and can you prove it?" The test suite is the proof. If `bun test` passes and the coverage is honest, the implementation is sound whether a human, an AI, or a team of both produced it.
