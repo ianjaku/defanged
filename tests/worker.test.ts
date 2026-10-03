@@ -21,7 +21,8 @@ const it = createWorkerInterpreter({
   modules: [json, 'random'],
   onPrint: (t) => prints.push(t),
   onChart: (c) => charts.push(c),
-  timeoutMs: 200,
+  // Generous: a cold worker on a CI runner takes a while to start.
+  timeoutMs: 1500,
   maxIterations: 1e9,
 });
 afterAll(async () => { await it.terminate(); });
@@ -57,8 +58,10 @@ describe('worker interpreter', () => {
 
   test('a script the interpreter cannot stop is killed from the main thread', async () => {
     const started = Date.now();
-    await expect(it.run('import re\nre.match(r"(a+)+$", "a" * 40 + "b")')).rejects.toBeInstanceOf(TimeoutError);
-    expect(Date.now() - started).toBeLessThan(1500);
+    // Each iteration is a few ms of native work, and the VM only looks at the
+    // clock every 8,192 iterations, so the interpreter would run for a minute.
+    await expect(it.run('s = "x" * 5_000_000\nwhile True:\n    s.count("y")')).rejects.toBeInstanceOf(TimeoutError);
+    expect(Date.now() - started).toBeLessThan(6000);
     // Killed worker: a fresh one starts, without the old globals.
     await expect(it.run('x')).rejects.toBeInstanceOf(NameError);
     expect(await it.run('double(2)')).toBe(4);

@@ -7,6 +7,7 @@ type and message of the exception that ended it, if any.
 import contextlib
 import io
 import json
+import re
 import sys
 
 
@@ -17,7 +18,11 @@ def run(code):
         with contextlib.redirect_stdout(out):
             exec(compile(code, "<case>", "exec"), {"__name__": "__main__"})
     except BaseException as e:  # noqa: BLE001 - the outcome includes any failure
-        error = {"type": type(e).__name__, "message": str(e)}
+        message = str(e)
+        # An ImportError names the module's file on this machine; drop the path.
+        if isinstance(e, ImportError):
+            message = re.sub(r" \(/[^)]*\)$", "", message)
+        error = {"type": type(e).__name__, "message": message}
     return {"stdout": out.getvalue(), "error": error}
 
 

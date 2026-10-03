@@ -30,7 +30,7 @@ assert.match(generateToolsPrompt({ double: (n) => n }), /- double\(n\)/);
 
 const w = createWorkerInterpreter({ tools: { double: (n) => n * 2 }, timeoutMs: 500 });
 assert.equal(await w.run('double(4)'), 8);
-await assert.rejects(w.run('import re\nre.match(r"(a+)+$", "a" * 40 + "b")'), (e) => e.name === 'TimeoutError');
+await assert.rejects(w.run('s = "x" * 5_000_000\nwhile True:\n    s.count("y")'), (e) => e.name === 'TimeoutError');
 await w.terminate();
 
 console.log('smoke ok', process.version);

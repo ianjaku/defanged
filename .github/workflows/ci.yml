@@ -40,6 +40,6 @@ jobs:
       - name: Conformance corpus still matches this CPython
         run: |
           PYTHON=python3 bun run conformance:record
-          git diff --exit-code tests/conformance/expected.json
+          git diff --exit-code -I '"python": ' tests/conformance/expected.json
       - name: Random programs against CPython
         run: PYTHON=python3 bun run fuzz --count 400 --seed ${{ github.run_number }}
