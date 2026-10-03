@@ -221,6 +221,7 @@ Long-lived interpreter. Options:
 - `onChart: (c: { type, data, x, y, title? }) => void` — receives `print_chart(type, data, x, y, title=)` calls; `type` is `bar`, `line`, `pie` or `area`, `y` a key or list of keys
 - `maxIterations: number` — budget for loop iterations, and separately for function calls, per `run()` (default 5,000,000 each). The call budget is what stops recursion that never loops, such as `fib(60)`
 - `timeoutMs: number` — wall-clock deadline per `run()`, including time spent inside awaited tool handlers (which `maxIterations` cannot bound). Raises a `TimeoutError` that Python code cannot catch. Default: no limit — set one if your host runs on an event loop it can't block indefinitely.
+- `run(code, { signal })` — an `AbortSignal` cancels the run with an uncatchable `CancelledError`. While the script waits on a tool, the abort takes effect at once; while it computes, the interpreter hands the event loop a turn every 10 ms at a loop boundary so the abort can be delivered, which also keeps a busy script from starving the rest of the process. `runPython` takes `signal` in its options object.
 - `limits: { maxStringLength?, maxCollectionSize? }` — allocation caps (defaults: 10,000,000 characters / elements). Exceeding one raises a Python-catchable `MemoryError` instead of OOMing the host. Pass `Infinity` to disable.
 - `now: () => number` — clock for `datetime.now()` / `date.today()`, in epoch milliseconds (default `Date.now`). A fractional value keeps its microseconds.
 - `timezone: string` — IANA timezone the sandboxed code appears to run in, e.g. `'Europe/Berlin'` (default `'UTC'`). Affects `datetime.now()`, `date.today()`, and how `fromisoformat()` localizes `Z`/offset-suffixed timestamps; pass the end user's timezone so dates render in their local time. All datetimes stay naive — see `FEATURES.md` for the full model.
@@ -315,7 +316,7 @@ The 0.3 array form (`[{ name, handler, parameters?, description?, group? }]`) is
 
 ### Errors the host sees
 
-Every failure is an `InterpreterError` subclass named after the Python exception (`TypeError`, `KeyError`, `ToolError`, `SyntaxError`, ...), exported from the package for `instanceof` checks. `error.message` is `Line N, Column N: <message>` with CPython's wording, `error.baseMessage` is the message alone, and `error.line` / `error.column` give the position.
+Every failure is an `InterpreterError` subclass named after the Python exception (`TypeError`, `KeyError`, `ToolError`, `SyntaxError`, ...), exported from the package for `instanceof` checks. `error.message` is `Line N, Column N: <message>` with CPython's wording, `error.baseMessage` is the message alone, and `error.line` / `error.column` give the position. Three are the host's limits rather than the script's mistakes and cannot be caught by the script: `MaxIterationsError`, `TimeoutError` and `CancelledError`.
 
 ### `generateToolsPrompt(tools, options?)`
 

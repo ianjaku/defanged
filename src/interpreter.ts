@@ -6,7 +6,7 @@
 import { BuiltinCallbacks, PrintCallback, createBuiltins } from './builtins';
 import { compile } from './compiler';
 import { createDatetimeModule, makeTzConverter } from './datetime';
-import { InterpreterError, TimeoutError, ToolError } from './errors';
+import { CancelledError, InterpreterError, TimeoutError, ToolError } from './errors';
 import { mathModule } from './math';
 import { parse } from './parser';
 import { reModule } from './re';
@@ -50,6 +50,12 @@ export interface InterpreterOptions extends BuiltinCallbacks {
   /** Extra importable modules, such as `json` from "defanged/json". Each
    *  must be pure computation: this is the only way to widen `import`. */
   modules?: PyModule[];
+}
+
+export interface RunOptions {
+  /** Cancels the run: the script stops at its next checkpoint (every few
+   *  thousand operations) or as soon as a pending tool call is abandoned. */
+  signal?: AbortSignal;
 }
 
 export class Interpreter {
@@ -100,10 +106,14 @@ export class Interpreter {
     };
   }
 
-  async run(source: string): Promise<any> {
+  /** Runs a script. `signal` cancels it at the next checkpoint, or while it
+   *  waits on a tool, with an uncatchable CancelledError. */
+  async run(source: string, options: RunOptions = {}): Promise<any> {
+    const signal = options.signal ?? null;
+    if (signal !== null && signal.aborted) throw new CancelledError(signal.reason);
     const code = compile(parse(source.trim()), this.host.globals);
-    const vm = new VM(this.host);
-    let result = await this.withDeadline(vm.runModule(code));
+    const vm = new VM(this.host, signal);
+    let result = await this.withDeadline(vm.runModule(code), signal);
     // A lazy iterator (zip, map, ...) reaches the host as its items.
     if (result instanceof PyIterator) result = new PyList((await vm.collect(result)).slice());
     try {
@@ -113,16 +123,27 @@ export class Interpreter {
     }
   }
 
-  /** Rejects when `timeoutMs` passes while the script is waiting on a tool
-   *  that has not settled. The VM itself only checks the clock while running. */
-  private withDeadline(running: PyValue | Promise<PyValue>): PyValue | Promise<PyValue> {
+  /** Rejects when `timeoutMs` passes or `signal` fires while the script is
+   *  waiting on a tool that has not settled. The VM itself only checks the
+   *  clock and the signal while running. */
+  private withDeadline(running: PyValue | Promise<PyValue>, signal: AbortSignal | null): PyValue | Promise<PyValue> {
+    if (!(running instanceof Promise)) return running;
     const { timeoutMs } = this.host;
-    if (timeoutMs === undefined || !Number.isFinite(timeoutMs) || !(running instanceof Promise)) return running;
-    let timer: ReturnType<typeof setTimeout>;
-    const expired = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new TimeoutError(timeoutMs)), timeoutMs);
+    const hasDeadline = timeoutMs !== undefined && Number.isFinite(timeoutMs);
+    if (!hasDeadline && signal === null) return running;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let onAbort: (() => void) | undefined;
+    const interrupted = new Promise<never>((_, reject) => {
+      if (hasDeadline) timer = setTimeout(() => reject(new TimeoutError(timeoutMs)), timeoutMs);
+      if (signal !== null) {
+        onAbort = () => reject(new CancelledError(signal.reason));
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
     });
-    return Promise.race([running, expired]).finally(() => clearTimeout(timer));
+    return Promise.race([running, interrupted]).finally(() => {
+      if (timer !== undefined) clearTimeout(timer);
+      if (onAbort !== undefined) signal!.removeEventListener('abort', onAbort);
+    });
   }
 
   private toolFunction(tool: NormalizedTool): PyBuiltin {

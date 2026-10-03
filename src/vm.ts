@@ -9,7 +9,7 @@
 
 import type { Code, FunctionProto } from './compiler';
 import {
-  AssertionError, AttributeError, ImportError, InterpreterError, MaxIterationsError, MemoryError,
+  AssertionError, AttributeError, CancelledError, ImportError, InterpreterError, MaxIterationsError, MemoryError,
   ModuleNotFoundError, NameError, RecursionError, RuntimeError, TimeoutError, TypeError,
   UnboundLocalError, ValueError, isUncatchable,
 } from './errors';
@@ -145,10 +145,15 @@ export class VM implements Runtime {
   private loopTicks = 0;
   private callTicks = 0;
   private readonly deadline: number;
+  /** True when there is a deadline or a signal to poll at all. */
+  private readonly watched: boolean;
+  /** When the script last gave the event loop a turn; only used with a signal. */
+  private lastYield = Date.now();
 
-  constructor(private readonly host: VMHost) {
+  constructor(private readonly host: VMHost, private readonly signal: AbortSignal | null = null) {
     this.builtins = host.builtins;
     this.deadline = host.timeoutMs !== undefined ? Date.now() + host.timeoutMs : Infinity;
+    this.watched = this.deadline !== Infinity || signal !== null;
   }
 
   /** Runs module code to completion and returns its result value. */
@@ -244,7 +249,7 @@ export class VM implements Runtime {
    *  collection limit, and the deadline when the work is large. */
   private checkpoint(size: number): void {
     this.checkCollection(size);
-    if (size >= 1024 && this.deadline !== Infinity) this.checkDeadline();
+    if (size >= 1024 && this.watched) this.checkDeadline();
   }
 
   // ── Generators ────────────────────────────────────────────────────────────
@@ -309,8 +314,17 @@ export class VM implements Runtime {
     if ((this.loopTicks & 8191) === 0) this.checkDeadline();
   }
 
+  private yieldToHost(): Promise<void> {
+    return new Promise((resolve) => setTimeout(() => {
+      this.lastYield = Date.now();
+      resolve();
+    }, 0));
+  }
+
   private checkDeadline(): void {
+    if (!this.watched) return;
     if (Date.now() > this.deadline) throw new TimeoutError(this.host.timeoutMs!);
+    if (this.signal !== null && this.signal.aborted) throw new CancelledError(this.signal.reason);
   }
 
   /** Calls `callee`. For a Python function this pushes its frame and
@@ -439,6 +453,7 @@ export class VM implements Runtime {
       () => {
         // maxIterations can't bound time spent awaiting a handler.
         if (Date.now() > this.deadline) this.unwind(new TimeoutError(this.host.timeoutMs!), base);
+        else if (this.signal !== null && this.signal.aborted) this.unwind(new CancelledError(this.signal.reason), base);
         return this.run(base);
       },
       (error) => {
@@ -809,7 +824,14 @@ export class VM implements Runtime {
               break;
             case Op.JUMP_LOOP:
               if (++this.loopTicks > maxIterations) throw new MaxIterationsError();
-              if ((this.loopTicks & 8191) === 0) this.checkDeadline();
+              if ((this.loopTicks & 8191) === 0) {
+                this.checkDeadline();
+                // An abort can only be delivered while the host's event loop
+                // runs, so a watched script hands it a turn every 10 ms.
+                if (this.signal !== null && Date.now() - this.lastYield >= 10) {
+                  return this.wait(frame, arg, sp, Await.DISCARD, this.yieldToHost());
+                }
+              }
               pc = arg;
               break;
             case Op.POP_JUMP_IF_FALSE: {

@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { createInterpreter, ToolDefinition, generateToolsPrompt, runPython, tool } from '../src';
+import { createInterpreter, ToolDefinition, generateToolsPrompt, runPython, tool, CancelledError } from '../src';
 import { parameterNames } from '../src/tools';
 import { z } from 'zod';
 
@@ -650,6 +650,54 @@ except ToolError as e:
     result = e
 result
 `)).toBe("Tool 'boom' failed: plain string");
+  });
+});
+
+describe('AbortSignal', () => {
+  test('a loop stops at the next checkpoint after abort', async () => {
+    const it = createInterpreter({ maxIterations: 1e9 });
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 20);
+    const started = Date.now();
+    await expect(it.run('i = 0\nwhile True:\n    i += 1', { signal: ac.signal })).rejects.toBeInstanceOf(CancelledError);
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  test('a pending tool call is abandoned on abort, and the reason is in the message', async () => {
+    const it = createInterpreter({ tools: { forever: () => new Promise(() => {}) } });
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(new Error('user left')), 10);
+    await expect(it.run('forever()', { signal: ac.signal })).rejects.toThrow('Execution was cancelled: user left');
+  });
+
+  test('the script cannot catch it, and finally does not run', async () => {
+    const it = createInterpreter({ maxIterations: 1e9 });
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 10);
+    await expect(it.run('try:\n    while True:\n        pass\nexcept BaseException:\n    pass\nfinally:\n    x = 1\n"caught"', { signal: ac.signal })).rejects.toBeInstanceOf(CancelledError);
+  });
+
+  test('an already-aborted signal rejects before running anything', async () => {
+    const ran: string[] = [];
+    const it = createInterpreter({ tools: { mark: () => { ran.push('x'); return null; } } });
+    const ac = new AbortController();
+    ac.abort();
+    await expect(it.run('mark()', { signal: ac.signal })).rejects.toBeInstanceOf(CancelledError);
+    expect(ran).toEqual([]);
+    expect(await it.run('1 + 1')).toBe(2);
+  });
+
+  test('a watched script that is never aborted runs to the right answer', async () => {
+    const it = createInterpreter({ maxIterations: 1e8 });
+    const src = 'total = 0\nfor i in range(300000):\n    for j in (1, 2):\n        total += i * j\nouter = 0\nwhile outer < 200000:\n    outer += 1\n(total, outer, [x for x in range(3)])';
+    expect(await it.run(src, { signal: new AbortController().signal })).toEqual(await it.run(src));
+  });
+
+  test('runPython accepts a signal in its options', async () => {
+    const ac = new AbortController();
+    ac.abort();
+    await expect(runPython('1', undefined, { signal: ac.signal })).rejects.toBeInstanceOf(CancelledError);
+    expect(await runPython('2', undefined, { signal: new AbortController().signal })).toBe(2);
   });
 });
 

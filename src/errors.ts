@@ -144,8 +144,18 @@ export class TimeoutError extends InterpreterError {
   }
 }
 
+/** The host aborted the run through its AbortSignal. */
+export class CancelledError extends InterpreterError {
+  static pyName = 'CancelledError';
+  constructor(reason?: unknown, line: number = 0, column: number = 0) {
+    const why = reason instanceof Error ? reason.message : typeof reason === 'string' ? reason : '';
+    super(why ? `Execution was cancelled: ${why}` : 'Execution was cancelled', line, column);
+    this.name = 'CancelledError';
+  }
+}
+
 export function isUncatchable(error: unknown): boolean {
-  return error instanceof MaxIterationsError || error instanceof TimeoutError;
+  return error instanceof MaxIterationsError || error instanceof TimeoutError || error instanceof CancelledError;
 }
 
 /** Every exception class a script can name, in definition order. */

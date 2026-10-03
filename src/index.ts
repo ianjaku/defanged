@@ -8,7 +8,7 @@
 export { tokenize, Lexer } from './lexer';
 export { parse, Parser } from './parser';
 export { createInterpreter, Interpreter } from './interpreter';
-export type { InterpreterOptions, ResourceLimits } from './interpreter';
+export type { InterpreterOptions, ResourceLimits, RunOptions } from './interpreter';
 export { tool } from './tools';
 export type { Tools, ToolSpec, ToolFunction, ParamSpec, ParamType, ArgsOf, StandardSchemaV1, ToolDefinition, ToolParameter } from './tools';
 
@@ -19,7 +19,7 @@ export * from './values';
 export * from './errors';
 
 // Convenience function for quick execution
-import { createInterpreter, type InterpreterOptions } from './interpreter';
+import { createInterpreter, type InterpreterOptions, type RunOptions } from './interpreter';
 import { NormalizedTool, ToolDefinition, Tools, normalizeTools, renderSignature } from './tools';
 
 /**
@@ -29,11 +29,11 @@ import { NormalizedTool, ToolDefinition, Tools, normalizeTools, renderSignature 
 export async function runPython(
   code: string,
   tools?: Tools | ToolDefinition[],
-  options?: ((output: string) => void) | Omit<InterpreterOptions, 'tools'>
+  options?: ((output: string) => void) | (Omit<InterpreterOptions, 'tools'> & RunOptions)
 ): Promise<any> {
-  const rest = typeof options === 'function' ? { onPrint: options } : options;
+  const { signal, ...rest } = typeof options === 'function' ? { onPrint: options, signal: undefined } : options ?? {};
   const interpreter = createInterpreter({ ...rest, tools });
-  return await interpreter.run(code);
+  return await interpreter.run(code, { signal });
 }
 
 export interface ToolsPromptOptions {
