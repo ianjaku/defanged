@@ -246,6 +246,15 @@ function floatDivmod(a: number, b: number): [number, number] {
   return [floor, mod];
 }
 
+/** The OverflowError C's pow() produces: errno 34 and libc's text for it, as
+ *  two args, so str(e) prints the pair. The text is macOS's; Linux says
+ *  "Numerical result out of range". */
+export function floatOverflow(): OverflowError {
+  const error = new OverflowError("(34, 'Result too large')");
+  error.args = [34, 'Result too large'];
+  return error;
+}
+
 /** A finite nonzero double as m * 2^e with an integer m, exactly. */
 function decompose(x: number): [bigint, number] {
   const view = new DataView(new ArrayBuffer(8));
@@ -306,7 +315,7 @@ function floatPow(a: number, b: number): number {
   if (Number.isInteger(b) && b !== 0 && a !== 0 && Number.isFinite(a)) r = exactPow(a, b);
   if (r === undefined) r = Math.pow(a, b);
   if (!Number.isFinite(r) && Number.isFinite(a) && Number.isFinite(b)) {
-    throw new OverflowError("(34, 'Result too large')");
+    throw floatOverflow();
   }
   return r;
 }

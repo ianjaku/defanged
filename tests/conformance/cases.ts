@@ -1204,8 +1204,10 @@ print(1.0 ** nan, 1.0 ** inf, (-1.0) ** nan, nan ** 0.0, (-1.0) ** -inf, 0.0 ** 
 for bad in [lambda: 0.0 ** -1, lambda: 1e300 ** 2, lambda: 2.0 ** 1024]:
     try:
         print(bad())
-    except (ValueError, ZeroDivisionError, OverflowError) as e:
+    except ZeroDivisionError as e:
         print(type(e).__name__, e)
+    except OverflowError as e:
+        print(type(e).__name__, e.args[0])  # the text is libc's and differs by platform
 `),
   c('functools', py`
 import functools

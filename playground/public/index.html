@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>defanged playground</title>
+<meta name="description" content="Run Python in the browser inside defanged, a sandboxed Python interpreter written in TypeScript. No filesystem, no network, tools you register.">
+<link rel="icon" href="icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a one-line header, then the editor and the output side by side, stacked on phones. */
+  :root {
+    --bg: #f6f8f7; --fg: #15202b; --muted: #5d6b76; --line: #d9e1de; --panel: #ffffff;
+    --navy: #0f2a4a; --teal: #2bb5a0; --teal-ink: #167a6b; --error: #b3261e; --error-bg: #fdecea;
+    --font-display: "Nunito", "Avenir Next Rounded", system-ui, sans-serif;
+    --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #0d161f; --fg: #e4ebf0; --muted: #94a3b0; --line: #243240; --panel: #121e2b; --teal-ink: #5fd3c0; --error: #ff8a80; --error-bg: #3a1b1b; color-scheme: dark; }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.45; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 14px; padding: 10px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header img { width: 34px; height: 34px; }
+  header h1 { font-family: var(--font-display); font-weight: 800; font-size: 1.25rem; margin: 0; color: var(--navy); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) header h1 { color: var(--fg); } }
+  header h1 span { color: var(--teal-ink); }
+  header p { margin: 0; color: var(--muted); flex: 1 1 260px; min-width: 0; font-size: 0.9rem; }
+  header nav { display: flex; gap: 14px; font-size: 0.9rem; }
+  a { color: var(--teal-ink); }
+  main { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 0; min-height: 0; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; grid-template-rows: minmax(260px, 45vh) 1fr; } }
+  .pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .pane + .pane { border-left: 1px solid var(--line); }
+  @media (max-width: 860px) { .pane + .pane { border-left: 0; border-top: 1px solid var(--line); } }
+  .bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .bar .grow { flex: 1; }
+  select, button { font: inherit; font-size: 0.9rem; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); padding: 6px 10px; }
+  button { cursor: pointer; }
+  button.primary { background: var(--teal); border-color: var(--teal); color: #fff; font-weight: 600; padding: 6px 16px; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+  .tabs button { border: 0; background: transparent; color: var(--muted); padding: 6px 8px; border-bottom: 2px solid transparent; border-radius: 0; }
+  .tabs button.active { color: var(--fg); border-bottom-color: var(--teal); }
+  textarea { flex: 1; width: 100%; resize: none; border: 0; padding: 14px 16px; font-family: var(--font-mono); font-size: 13.5px; line-height: 1.5; background: var(--panel); color: var(--fg); tab-size: 4; }
+  #status { color: var(--muted); font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+  #output, #prompt { flex: 1; overflow: auto; padding: 12px 16px; background: var(--panel); font-family: var(--font-mono); font-size: 13px; line-height: 1.5; margin: 0; white-space: pre-wrap; word-break: break-word; }
+  .out { margin: 0 0 6px; }
+  .out.print { white-space: pre-wrap; }
+  .out.result { border-left: 3px solid var(--teal); padding-left: 10px; color: var(--teal-ink); white-space: pre-wrap; }
+  .out.error { background: var(--error-bg); color: var(--error); padding: 8px 10px; border-radius: 6px; white-space: pre-wrap; }
+  .out.muted, .muted { color: var(--muted); }
+  .out .title { font-family: var(--font-body); font-weight: 600; margin: 6px 0 4px; }
+  table { border-collapse: collapse; font-size: 12.5px; margin: 4px 0 8px; }
+  th, td { border-bottom: 1px solid var(--line); padding: 3px 10px 3px 0; text-align: left; font-variant-numeric: tabular-nums; }
+  th { color: var(--muted); font-weight: 500; }
+  footer { padding: 8px 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.8rem; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <img src="icon.png" alt="">
+  <h1>defanged <span>playground</span></h1>
+  <p>Python, run by a sandboxed interpreter written in TypeScript. The whole thing runs here in your browser: no filesystem, no network, only the four tools this page registered.</p>
+  <nav>
+    <a href="https://github.com/ianjaku/defanged">GitHub</a>
+    <a href="https://www.npmjs.com/package/defanged">npm</a>
+  </nav>
+</header>
+<main>
+  <section class="pane" aria-label="Editor">
+    <div class="bar">
+      <label for="examples" class="muted">Example</label>
+      <select id="examples"></select>
+      <span class="grow"></span>
+      <button id="reset" title="Clear the interpreter's globals">Reset</button>
+      <button id="stop" disabled>Stop</button>
+      <button id="run" class="primary" title="Cmd/Ctrl + Enter">Run</button>
+    </div>
+    <textarea id="code" spellcheck="false" aria-label="Python source"></textarea>
+  </section>
+  <section class="pane" aria-label="Output">
+    <div class="bar tabs">
+      <button data-tab="output" class="active">Output</button>
+      <button data-tab="prompt" title="What generateToolsPrompt() gives the model for this page's tools">Prompt the model sees</button>
+      <span class="grow"></span>
+      <span id="status"></span>
+    </div>
+    <div id="output" data-panel="output" aria-live="polite"></div>
+    <pre id="prompt" data-panel="prompt" hidden></pre>
+  </section>
+</main>
+<footer>Tools on this page return sample data generated in the browser. Limits for this page: 2,000,000 loop iterations and 3 seconds per run, and Stop cancels through an AbortSignal.</footer>
+<script type="module" src="app.js"></script>
+</body>
+</html>

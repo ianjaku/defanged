@@ -113,7 +113,7 @@
   },
   "float power edge cases": {
    "error": null,
-   "stdout": "inf inf 0.0 -inf -0.0 nan inf 0.0 1.0 0.0\n1.0 1.0 nan 1.0 1.0 nan 0.0 5e-324 5.9049000000000085e-06 1.0001000049952247 9.417362622231694e+59 2.7197216389364318e-11 -0.125 1e-05\nZeroDivisionError zero to a negative power\nOverflowError (34, 'Result too large')\nOverflowError (34, 'Result too large')\n"
+   "stdout": "inf inf 0.0 -inf -0.0 nan inf 0.0 1.0 0.0\n1.0 1.0 nan 1.0 1.0 nan 0.0 5e-324 5.9049000000000085e-06 1.0001000049952247 9.417362622231694e+59 2.7197216389364318e-11 -0.125 1e-05\nZeroDivisionError zero to a negative power\nOverflowError 34\nOverflowError 34\n"
   },
   "float repr round-trips": {
    "error": null,

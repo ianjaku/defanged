@@ -79,6 +79,8 @@
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "bun run build",
     "fuzz": "bun tests/fuzz/run.ts",
+    "playground:build": "bun playground/build.ts",
+    "playground:deploy": "bun playground/build.ts && wrangler pages deploy playground/dist --project-name defanged",
     "conformance:record": "bun tests/conformance/record.ts"
   },
   "devDependencies": {
