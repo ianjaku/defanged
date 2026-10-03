@@ -383,7 +383,7 @@ Importing anything else raises `ModuleNotFoundError` (catchable with `except Imp
 | `datetime.utcnow()` | UTC wall-clock time | `new Date()` UTC getters |
 | `datetime.fromisoformat(s)` / `date.fromisoformat(s)` | Parse ISO 8601 | `new Date(s)` |
 | `datetime.strptime(s, fmt)` | Parse with `%Y-%m-%d`-style directives | date library |
-| `d.isoformat()` | ISO 8601 string | `d.toISOString()` |
+| `d.isoformat(sep="T", timespec="auto")` | ISO 8601 string; `timespec` is `hours`, `minutes`, `seconds`, `milliseconds` or `microseconds` | `d.toISOString()` |
 | `d.strftime(fmt)` | Format (`%Y %y %m %d %H %M %S %f %I %p %j %a %A %b %B %%`) | date library |
 | `d.year` … `d.microsecond`, `td.days/seconds/microseconds` | Component access | `getFullYear()` etc. |
 | `d.weekday()` | Monday=0 … Sunday=6 | `(getDay() + 6) % 7` |

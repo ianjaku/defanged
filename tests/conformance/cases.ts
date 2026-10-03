@@ -1209,6 +1209,19 @@ for bad in [lambda: 0.0 ** -1, lambda: 1e300 ** 2, lambda: 2.0 ** 1024]:
     except OverflowError as e:
         print(type(e).__name__, e.args[0])  # the text is libc's and differs by platform
 `),
+  c('datetime isoformat options', py`
+from datetime import datetime, date
+d = datetime(2026, 3, 4, 5, 6, 7, 890123)
+e = datetime(2026, 3, 4, 5, 6, 7)
+for ts in ["auto", "hours", "minutes", "seconds", "milliseconds", "microseconds"]:
+    print(ts, d.isoformat(timespec=ts), e.isoformat(timespec=ts))
+print(d.isoformat(" "), d.isoformat(sep="x", timespec="minutes"), d.isoformat("T", "seconds"), date(2026, 3, 4).isoformat())
+for bad in [lambda: d.isoformat(timespec="nope"), lambda: d.isoformat(sep=1), lambda: d.isoformat("ab"), lambda: date(2026, 3, 4).isoformat("T")]:
+    try:
+        print(bad())
+    except (ValueError, TypeError) as e:
+        print(type(e).__name__, e)
+`),
   c('functools', py`
 import functools
 from functools import reduce, partial, lru_cache, cache, cmp_to_key, wraps

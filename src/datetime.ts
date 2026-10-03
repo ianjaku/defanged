@@ -11,7 +11,7 @@ import { AttributeError, OverflowError, TypeError, ValueError } from './errors';
 import { PyFloat, isNum, toFloat } from './numbers';
 import {
   Kwargs, NativeFn, PyBuiltin, PyDate, PyDateTime, PyModule, PyTimeDelta, PyType, PyValue,
-  T_DATE, T_DATETIME, T_TIMEDELTA, typeName,
+  T_DATE, T_DATETIME, T_TIMEDELTA, strLength, typeName,
 } from './values';
 
 // ── Calendar helpers ─────────────────────────────────────────────────────────
@@ -135,9 +135,20 @@ export function isoformatDate(d: { year: number; month: number; day: number }): 
   return `${pad(d.year, 4)}-${pad(d.month, 2)}-${pad(d.day, 2)}`;
 }
 
-export function isoformatDatetime(dt: PyDateTime, sep = 'T'): string {
-  let time = `${pad(dt.hour, 2)}:${pad(dt.minute, 2)}:${pad(dt.second, 2)}`;
-  if (dt.microsecond !== 0) time += `.${pad(dt.microsecond, 6)}`;
+export function isoformatDatetime(dt: PyDateTime, sep = 'T', timespec = 'auto'): string {
+  let time: string;
+  switch (timespec) {
+    case 'hours': time = pad(dt.hour, 2); break;
+    case 'minutes': time = `${pad(dt.hour, 2)}:${pad(dt.minute, 2)}`; break;
+    case 'seconds': time = `${pad(dt.hour, 2)}:${pad(dt.minute, 2)}:${pad(dt.second, 2)}`; break;
+    case 'milliseconds': time = `${pad(dt.hour, 2)}:${pad(dt.minute, 2)}:${pad(dt.second, 2)}.${pad(Math.floor(dt.microsecond / 1000), 3)}`; break;
+    case 'microseconds': time = `${pad(dt.hour, 2)}:${pad(dt.minute, 2)}:${pad(dt.second, 2)}.${pad(dt.microsecond, 6)}`; break;
+    case 'auto':
+      time = `${pad(dt.hour, 2)}:${pad(dt.minute, 2)}:${pad(dt.second, 2)}`;
+      if (dt.microsecond !== 0) time += `.${pad(dt.microsecond, 6)}`;
+      break;
+    default: throw new ValueError('Unknown timespec value');
+  }
   return `${isoformatDate(dt)}${sep}${time}`;
 }
 
@@ -573,8 +584,18 @@ export function getDatetimeAttr(obj: PyDate | PyDateTime | PyTimeDelta, attr: st
     case 'year': return obj.year;
     case 'month': return obj.month;
     case 'day': return obj.day;
-    case 'isoformat': return method('isoformat', () =>
-      obj instanceof PyDateTime ? isoformatDatetime(obj) : isoformatDate(obj));
+    case 'isoformat': return method('isoformat', (_rt, args, kwargs) => {
+      if (!(obj instanceof PyDateTime)) {
+        if (args.length > 0 || (kwargs && kwargs.size > 0)) throw new TypeError(`date.isoformat() takes no arguments (${args.length + (kwargs?.size ?? 0)} given)`);
+        return isoformatDate(obj);
+      }
+      const sep = args.length > 0 ? args[0] : kwargs?.get('sep') ?? 'T';
+      if (typeof sep !== 'string') throw new TypeError(`isoformat() argument 1 must be a unicode character, not ${typeName(sep)}`);
+      if (strLength(sep) !== 1) throw new TypeError(`isoformat() argument 1 must be a unicode character, not a string of length ${strLength(sep)}`);
+      const timespec = args.length > 1 ? args[1] : kwargs?.get('timespec') ?? 'auto';
+      if (typeof timespec !== 'string') throw new TypeError(`isoformat() argument 2 must be str, not ${typeName(timespec)}`);
+      return isoformatDatetime(obj, sep, timespec);
+    }, true);
     case 'strftime': return method('strftime', (_rt, args) => {
       if (typeof args[0] !== 'string') throw new TypeError('strftime() argument must be str');
       return strftime(c, args[0]);
