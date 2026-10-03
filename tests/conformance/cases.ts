@@ -1171,6 +1171,124 @@ try:
 except AttributeError as e:
     print(e)
 `),
+  c('functools', py`
+import functools
+from functools import reduce, partial, lru_cache, cache, cmp_to_key, wraps
+print(reduce(lambda a, b: a + b, [1, 2, 3, 4]), reduce(lambda a, b: a * b, [1, 2, 3], 10), reduce(lambda a, b: a + [b], "ab", []), reduce(max, [3, 9, 2]), functools.reduce(lambda a, b: a - b, [10, 1, 2], initial=100))
+for bad in [lambda: reduce(lambda a, b: a, []), lambda: reduce(lambda a, b: a, 5), lambda: reduce(lambda a, b: a)]:
+    try:
+        bad()
+    except TypeError as e:
+        print("TypeError", e)
+def f(a, b, c=0, *, d=1):
+    return (a, b, c, d)
+p = partial(f, 1, d=9)
+print(p(2), p(2, 3), p(2, c=4, d=5), p.args, p.keywords, p.func is f, partial(p, 7).args, partial(p, 7, d=0)(), partial(max, key=len)(["aa", "b"]), partial(int, base=2)("101"))
+try:
+    partial(5)
+except TypeError as e:
+    print(e)
+calls = []
+@lru_cache(maxsize=2)
+def square(n):
+    calls.append(n)
+    return n * n
+print([square(2), square(3), square(2), square(4), square(3), square(2)], calls, square.cache_info(), square.cache_parameters(), square.cache_info().hits, square.cache_info()[1])
+square.cache_clear()
+print(square.cache_info(), square(5), square.cache_info().currsize)
+@lru_cache
+def fib(n):
+    return n if n < 2 else fib(n - 1) + fib(n - 2)
+print(fib(80), fib.cache_info(), type(fib.cache_info()).__name__)
+@cache
+def g(a, b=1, *, c=2):
+    calls.append("g")
+    return a + b + c
+calls.clear()
+print(g(1), g(1), g(1.0), g(1, 1), g(1.0, 1), g(1, b=1), g(1, b=1), g(1, c=2), g(True), calls, g.cache_info())
+@lru_cache(maxsize=None, typed=True)
+def h(x):
+    return x
+h(1); h(1.0); h(1); h(True)
+print(h.cache_info(), functools.lru_cache(0)(len).cache_info(), functools.lru_cache(maxsize=0)(len)("ab"))
+try:
+    fib([1])
+except TypeError as e:
+    print(e)
+try:
+    lru_cache("x")
+except TypeError as e:
+    print(e)
+def by_len_then_alpha(a, b):
+    if len(a) != len(b):
+        return len(a) - len(b)
+    return -1 if a < b else (1 if a > b else 0)
+words = ["pear", "fig", "apple", "kiwi", "date", "fig"]
+print(sorted(words, key=cmp_to_key(by_len_then_alpha)), sorted(words, key=cmp_to_key(by_len_then_alpha), reverse=True), max(words, key=cmp_to_key(by_len_then_alpha)), min(words, key=cmp_to_key(by_len_then_alpha)))
+K = cmp_to_key(lambda a, b: a - b)
+print(K(1) < K(2), K(2) > K(1), K(1) <= K(1), K(3) >= K(4), K(5).obj, sorted([3, 1, 2], key=K), sorted([(1, "b"), (1, "a"), (0, "z")], key=cmp_to_key(lambda a, b: a[0] - b[0])))
+xs = [3, 1, 2]
+xs.sort(key=cmp_to_key(lambda a, b: b - a))
+print(xs, sorted([1.5, -2, 0], key=cmp_to_key(lambda a, b: a - b)))
+for bad in [lambda: K(1) < 3, lambda: cmp_to_key(lambda a, b: "x")(1) < cmp_to_key(lambda a, b: "x")(2)]:
+    try:
+        bad()
+    except TypeError as e:
+        print("TypeError", e)
+def logged(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        calls.append(args)
+        return fn(*args, **kwargs)
+    return wrapper
+@logged
+def add(a, b):
+    return a + b
+calls.clear()
+print(add(1, 2), add(b=3, a=4), calls, functools.update_wrapper(lambda: 1, add)())
+`),
+  c('string', py`
+import string
+print(string.ascii_letters, string.ascii_lowercase, string.ascii_uppercase, string.digits, string.hexdigits, string.octdigits)
+print(repr(string.punctuation), repr(string.whitespace), len(string.printable), string.printable[:62])
+print(string.capwords("hello  world-foo bar"), string.capwords("hello  world-foo bar", "-"), string.capwords("  lead and trail  "), string.capwords("a,b,,c", ","), string.capwords(""), string.capwords("ÉCOLE élève"), string.capwords("x\\ty\\nz"))
+print([c for c in "a1 B2_!" if c in string.ascii_letters], all(c in string.hexdigits for c in "dead BEEF".replace(" ", "")), "".join(c for c in "Hello, World!" if c not in string.punctuation), string.digits.index("7"))
+from string import ascii_uppercase as up
+print(up[:3], len(up), "Z" in up)
+try:
+    string.capwords(5)
+except AttributeError as e:
+    print("AttributeError", e)
+`),
+  c('random seeded', py`
+import random
+random.seed(42)
+print(random.random(), random.random(), random.randint(1, 100), random.randint(-5, 5), random.randrange(10), random.randrange(5, 50, 5), random.randrange(100, 0, -7), random.getrandbits(8), random.getrandbits(32), random.getrandbits(64), random.getrandbits(100), random.getrandbits(0))
+xs = list(range(12))
+random.shuffle(xs)
+print(xs, random.choice("abcdef"), random.choice([10, 20, 30]), random.choice((1,)), random.choice(range(100, 200)))
+print(random.sample(range(1000), 5), random.sample([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 7), random.sample("abc", 3), random.sample([1, 2], 0), random.sample(range(10), 3, counts=[1] * 10), random.sample(["x", "y"], 3, counts=[2, 3]), random.sample(range(100000), 30)[:5])
+print(random.choices(["a", "b", "c"], weights=[5, 1, 1], k=6), random.choices(["a", "b", "c"], k=3), random.choices([1, 2, 3], cum_weights=[1, 2, 10], k=4), random.choices("xy"), random.choices([1, 2], weights=[0.5, 1.5], k=2))
+print(random.uniform(1, 3), random.uniform(-1.5, 1.5), random.gauss(0, 1), random.gauss(), random.gauss(10, 2), random.normalvariate(10, 2), random.normalvariate(), random.expovariate(2), random.expovariate(), random.triangular(0, 10, 2), random.triangular(), random.triangular(1, 1, 1))
+for seed in [0, 1, -5, 2 ** 70, 123456789, True]:
+    random.seed(seed)
+    print(seed, random.random(), random.randint(1, 10 ** 12), random.randint(1, 2 ** 70))
+random.seed(7)
+r = random.Random(7)
+print(r.random() == random.random(), r.randint(1, 6), random.randint(1, 6), type(r).__name__, isinstance(r, random.Random))
+r2 = random.Random(7)
+r2.seed(7)
+print([r2.random() for _ in range(2)] == [random.Random(7).random() for _ in range(2)], random.Random(1).choice([1, 2, 3]), random.Random().random() != random.Random().random())
+random.seed(3)
+a = [random.random() for _ in range(3)]
+random.seed(3)
+print(a == [random.random() for _ in range(3)], sum(1 for _ in range(1000) if 1 <= random.randint(1, 6) <= 6), len({random.randint(1, 6) for _ in range(200)}))
+for bad in [lambda: random.randint(5, 1), lambda: random.randrange(0), lambda: random.randrange(5, 2), lambda: random.randrange(1, 10, 0), lambda: random.randrange(10, 1, 2), lambda: random.randrange(1.5), lambda: random.randint(1, 2.5), lambda: random.choice([]), lambda: random.sample([1, 2, 3], 4), lambda: random.sample({1, 2, 3}, 1), lambda: random.sample([1, 2, 3], -1), lambda: random.sample([1, 2, 3], 1.5), lambda: random.sample([1, 2], 1, counts=[1]), lambda: random.choices([1, 2], weights=[1]), lambda: random.choices([1, 2], weights=[0, 0]), lambda: random.choices([1, 2], weights=[1, 2], cum_weights=[1, 2]), lambda: random.choices([]), lambda: random.shuffle((1, 2)), lambda: random.getrandbits(-1), lambda: random.getrandbits(2.5), lambda: random.uniform("a", 1), lambda: random.choice({1: 2})]:
+    try:
+        print(bad())
+    except (ValueError, TypeError, IndexError, KeyError) as e:
+        print(type(e).__name__, e)
+`),
 
   // ── Whole programs ────────────────────────────────────────────────────────
   c('report script', py`

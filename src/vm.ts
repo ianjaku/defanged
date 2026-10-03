@@ -62,8 +62,9 @@ const enum Await {
 const MAX_SAFE = Number.MAX_SAFE_INTEGER;
 /** Nested Python calls allowed, like CPython's recursion limit. */
 const MAX_DEPTH = 1000;
-/** Built-ins calling back into Python may nest this deep; each level costs JS stack. */
-const MAX_NESTING = 100;
+/** Built-ins calling back into Python (lru_cache, sorted key=) may nest this
+ *  deep. Each level costs JS stack; Node's default stack holds about 680. */
+const MAX_NESTING = 500;
 const NO_CELLS: Cell[] = [];
 const NO_VALUES: PyValue[] = [];
 /** Returned by `invoke` when it pushed a Python frame instead of producing a value. */

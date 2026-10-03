@@ -11,12 +11,12 @@ import {
   PyFloat, PyInt, floatToInt, intAdd, intNeg, intPowMod, isIntLike, isNum, normBig, parseFloatString,
   parseIntString, roundHalfEven, toFixedPy, toFloat,
 } from './numbers';
-import { asIndex, binary } from './ops';
+import { asIndex, binary, ordered } from './ops';
 import {
   DONE, Done, ELLIPSIS, Kwargs, MA, NativeFn, PyBuiltin, PyDict, PyDictView, PyFunction, PyGenerator, PyObject,
   PyIterator, PyList, PyRange, PySet, PySlice, PyTimeDelta, PyTuple, PyType, PyValue, Runtime, SeqIterator,
   T_BOOL, T_DICT, T_FLOAT, T_INT, T_LIST, T_NONE, T_RANGE, T_SET, T_SLICE, T_STR, T_TUPLE, T_TYPE,
-  dictGet, exceptionType, hashKey, identityOf, pyCompare, pyRepr, pySetFrom, pyStr, strChars, strLength,
+  dictGet, exceptionType, hashKey, identityOf, pyRepr, pySetFrom, pyStr, strChars, strLength,
   andThen, truthy, typeName, typeOf, valueToJs,
 } from './values';
 import { BinOp } from './vm';
@@ -278,14 +278,27 @@ function extreme(rt: Runtime, name: 'min' | 'max', args: PyValue[], kwargs: Kwar
     throw new TypeError(`Cannot specify a default for ${name}() with multiple positional arguments`);
   }
   const op = name === 'max' ? '>' : '<';
-  const pick = (items: PyValue[], keys: PyValue[]): PyValue => {
+  const pick = (items: PyValue[], keys: PyValue[]): MA<PyValue> => {
     if (items.length === 0) {
       if (fallback !== undefined) return fallback;
       throw new ValueError(`${name}() iterable argument is empty`);
     }
     let best = 0;
-    for (let i = 1; i < items.length; i++) if (pyCompare(op, keys[i], keys[best])) best = i;
-    return items[best];
+    const scan = (i: number): MA<PyValue> => {
+      for (; i < items.length; i++) {
+        const r = ordered(rt, op, keys[i], keys[best]);
+        if (r instanceof Promise) {
+          const at = i;
+          return r.then((wins) => {
+            if (wins) best = at;
+            return scan(at + 1);
+          });
+        }
+        if (r) best = i;
+      }
+      return items[best];
+    };
+    return scan(1);
   };
   return andThen(args.length === 1 ? rt.collect(args[0]) : args, (items) => {
     if (key === undefined || key === null) return pick(items, items);

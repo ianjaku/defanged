@@ -130,6 +130,10 @@
    },
    "stdout": "f() missing 1 required positional argument: 'b'\nf() takes 2 positional arguments but 3 were given\nf() got an unexpected keyword argument 'c'\nf() got multiple values for argument 'b'\nf() missing 2 required positional arguments: 'a' and 'b'\nk() missing 1 required keyword-only argument: 'key'\nk() takes 0 positional arguments but 1 was given\n"
   },
+  "functools": {
+   "error": null,
+   "stdout": "10 60 ['a', 'b'] 9 87\nTypeError reduce() of empty iterable with no initial value\nTypeError reduce() arg 2 must support iteration\nTypeError reduce() takes at least 2 positional arguments (1 given)\n(1, 2, 0, 9) (1, 2, 3, 9) (1, 2, 4, 5) (1,) {'d': 9} True (1, 7) (1, 7, 0, 0) aa 5\nthe first argument must be callable\n[4, 9, 4, 16, 9, 4] [2, 3, 4, 3, 2] CacheInfo(hits=1, misses=5, maxsize=2, currsize=2) {'maxsize': 2, 'typed': False} 1 5\nCacheInfo(hits=0, misses=0, maxsize=2, currsize=0) 25 1\n23416728348467685 CacheInfo(hits=78, misses=81, maxsize=128, currsize=81) CacheInfo\n4 4 4.0 4 4 4 4 4 4.0 ['g', 'g', 'g', 'g', 'g'] CacheInfo(hits=4, misses=5, maxsize=None, currsize=5)\nCacheInfo(hits=1, misses=3, maxsize=None, currsize=3) CacheInfo(hits=0, misses=0, maxsize=0, currsize=0) 2\nunhashable type: 'list'\nExpected first argument to be an integer, a callable, or None\n['fig', 'fig', 'date', 'kiwi', 'pear', 'apple'] ['apple', 'pear', 'kiwi', 'date', 'fig', 'fig'] apple fig\nTrue True True False 5 [1, 2, 3] [(0, 'z'), (1, 'b'), (1, 'a')]\n[3, 2, 1] [-2, 0, 1.5]\nTypeError other argument must be K instance\nTypeError '<' not supported between instances of 'str' and 'int'\n3 7 [(1, 2), ()] 1\n"
+  },
   "generator send and return value": {
    "error": {
     "message": "",
@@ -279,6 +283,10 @@
    "error": null,
    "stdout": "a|1|None|True|2.5|[1, 'b']\n\nno args above (1,) {'k': (1, 2.0)} {1, 2} range(0, 2)\n1.0 -1.5e-10 1e+22 12345678901234567890 0.7999999999999999 1.0\n"
   },
+  "random seeded": {
+   "error": null,
+   "stdout": "0.6394267984578837 0.025010755222666936 36 -2 3 15 23 26 2906402157 16457808150190122675 522152611743920550222071931956 0\n[5, 7, 2, 9, 10, 6, 4, 8, 3, 1, 11, 0] b 20 1 100\n[777, 825, 163, 714, 432] [6, 5, 3, 2, 8, 1, 9] ['b', 'a', 'c'] [] [5, 4, 0] ['y', 'x', 'x'] [10328, 72357, 38427, 82397, 81070]\n['a', 'a', 'a', 'b', 'a', 'a'] ['c', 'b', 'b'] [3, 3, 3, 3] ['x'] [2, 2]\n1.421965687172653 1.3287291430051633 0.6199677677731354 -0.6094034586430621 8.876404815331938 12.628366762610971 -0.5353986344752939 0.41204739605535046 0.3048168492191914 4.235182502271494 0.7739722180820209 1\n0 0.8444218515250481 978212965549 609489359447819719766\n1 0.13436424411240122 884107995872 591459925792611810245\n-5 0.6229016948897019 394027974810 65117741788583263649\n1180591620717411303424 0.2327882718301838 538653608400 547050257909258156303\n123456789 0.6414006161858726 779717765760 1101069600642506055372\nTrue 0.13436424411240122 884107995872 591459925792611810245\nTrue 2 2 Random True\nFalse 1 True\nTrue 1000 6\nValueError empty range in randint(5, 1)\nValueError empty range for randrange()\nValueError empty range in randrange(5, 2)\nValueError zero step for randrange()\nValueError empty range in randrange(10, 1, 2)\nTypeError 'float' object cannot be interpreted as an integer\nTypeError 'float' object cannot be interpreted as an integer\nIndexError Cannot choose from an empty sequence\nValueError Sample larger than population or is negative\nTypeError Population must be a sequence.  For dicts or sets, use sorted(d).\nValueError Sample larger than population or is negative\nTypeError can't multiply sequence by non-int of type 'float'\nValueError The number of counts does not match the population\nValueError The number of weights does not match the population\nValueError Total of weights must be greater than zero\nTypeError Cannot specify both weights and cumulative weights\nIndexError list index out of range\nTypeError 'tuple' object does not support item assignment\nValueError Cannot convert negative int\nTypeError 'float' object cannot be interpreted as an integer\nTypeError unsupported operand type(s) for -: 'int' and 'str'\nKeyError 0\n"
+  },
   "re module": {
    "error": null,
    "stdout": "['2026-01-05', '2026-02-11'] [('Order', '12'), ('on', '2026'), ('order', '7'), ('on', '2026')] 7\n2026-01 2026 ('2026', '01') {'y': '2026', 'm': '01'} 20 27 (20, 24) 2026-01 01\na#b# 1a 2b a2b10 ('bba', 2)\n['a', 'b', 'c'] ['a', '-', 'b'] None True a\\.b\\*c\n[('5', 'KG'), ('20', 'g')] ['kg', 'g'] (\\d+)\\s*(kg|g) ?\na[b] a[]\n['12', '345'] True ['ab', 'ef']\n"
@@ -361,6 +369,10 @@
   "str.format numbers a field before its nested spec": {
    "error": null,
    "stdout": "    x|     x|3.1|    x|\n"
+  },
+  "string": {
+   "error": null,
+   "stdout": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789 0123456789abcdefABCDEF 01234567\n'!\"#$%&\\'()*+,-./:;<=>?@[\\\\]^_`{|}~' ' \\t\\n\\r\\x0b\\x0c' 100 0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\nHello World-foo Bar Hello  world-Foo bar Lead And Trail A,B,,C  \u00c9cole \u00c9l\u00e8ve X\\ty\\nz\n['a', 'B'] True Hello World 7\nABC 26 True\nAttributeError 'int' object has no attribute 'split'\n"
   },
   "string index out of range": {
    "error": {

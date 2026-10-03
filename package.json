@@ -44,6 +44,18 @@
     "./collections": {
       "types": "./dist/collections.d.ts",
       "import": "./dist/collections.js"
+    },
+    "./functools": {
+      "types": "./dist/functools.d.ts",
+      "import": "./dist/functools.js"
+    },
+    "./string": {
+      "types": "./dist/string.d.ts",
+      "import": "./dist/string.js"
+    },
+    "./random": {
+      "types": "./dist/random.d.ts",
+      "import": "./dist/random.js"
     }
   },
   "files": [
@@ -56,7 +68,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts ./src/json.ts ./src/itertools.ts ./src/collections.ts --outdir ./dist --target node --format esm --splitting && tsc --emitDeclarationOnly --declaration --outDir dist",
+    "build": "bun build ./src/index.ts ./src/json.ts ./src/itertools.ts ./src/collections.ts ./src/functools.ts ./src/string.ts ./src/random.ts --outdir ./dist --target node --format esm --splitting && tsc --emitDeclarationOnly --declaration --outDir dist",
     "test": "bun test",
     "test:features": "bun test tests/features.test.ts",
     "bench": "bun benchmarks/run.ts",

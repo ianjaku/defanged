@@ -9,10 +9,10 @@ import { IndexError, OverflowError, TypeError, ValueError } from './errors';
 import { percentFormat } from './format';
 import { PyFloat, intInvert, intNeg, isIntLike, isNum, numBinary } from './numbers';
 import {
-  MA, PyDict, PyDictView, PyGenerator, PyIterator, PyList, PyObject, PyRange, PySet,
+  MA, OrderOp, PyDict, PyDictView, PyGenerator, PyIterator, PyList, PyObject, PyRange, PySet,
   PySlice, PyTimeDelta, PyTuple, PyValue, Runtime,
-  copyDict, dictDelete, dictGet, dictHas, dictSet, isAstral, keyError, pyCompare, pyEquals, pyIs, pySetFrom,
-  sameOrEqual, setHas, strChars, andThen, typeName,
+  copyDict, dictDelete, dictGet, dictHas, dictSet, isAstral, keyError, orderResult, pyCompare, pyEquals, pyIs,
+  pySetFrom, sameOrEqual, setHas, strChars, andThen, typeName,
 } from './values';
 import { BinOp, CmpOp, UnOp } from './vm';
 
@@ -442,14 +442,29 @@ export function contains(rt: Runtime, container: PyValue, item: PyValue): MA<boo
   throw new TypeError(`argument of type '${typeName(container)}' is not a container or iterable`);
 }
 
+/** Three-way ordering where at least one side is a module-defined object. */
+export function objectOrder(rt: Runtime, op: OrderOp, a: PyValue, b: PyValue): MA<number> {
+  const r = a instanceof PyObject ? a.compareTo(rt, b, op) : undefined;
+  if (r !== undefined) return r;
+  const s = b instanceof PyObject ? b.compareTo(rt, a, op) : undefined;
+  if (s !== undefined) return andThen(s, (c) => -c);
+  throw new TypeError(`'${op}' not supported between instances of '${typeName(a)}' and '${typeName(b)}'`);
+}
+
+/** `a <op> b` for the ordering operators; waits only for module objects. */
+export function ordered(rt: Runtime, op: OrderOp, a: PyValue, b: PyValue): MA<boolean> {
+  if (a instanceof PyObject || b instanceof PyObject) return andThen(objectOrder(rt, op, a, b), (c) => orderResult(op, c));
+  return pyCompare(op, a, b);
+}
+
 export function compare(rt: Runtime, op: CmpOp, a: PyValue, b: PyValue): MA<boolean> {
   switch (op) {
     case CmpOp.EQ: return pyEquals(a, b);
     case CmpOp.NE: return !pyEquals(a, b);
-    case CmpOp.LT: return pyCompare('<', a, b);
-    case CmpOp.GT: return pyCompare('>', a, b);
-    case CmpOp.LE: return pyCompare('<=', a, b);
-    case CmpOp.GE: return pyCompare('>=', a, b);
+    case CmpOp.LT: return ordered(rt, '<', a, b);
+    case CmpOp.GT: return ordered(rt, '>', a, b);
+    case CmpOp.LE: return ordered(rt, '<=', a, b);
+    case CmpOp.GE: return ordered(rt, '>=', a, b);
     case CmpOp.IN: return contains(rt, b, a);
     case CmpOp.NOT_IN: return andThen(contains(rt, b, a), (r) => !r);
     case CmpOp.IS: return pyIs(a, b);

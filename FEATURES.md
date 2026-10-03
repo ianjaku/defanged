@@ -210,7 +210,7 @@ Like CPython, `True`/`1`/`1.0` are the same key, and unhashable keys (lists, dic
 - Short-circuit `and` / `or` (note: they return the operand, not a boolean — like `&&` / `||` in TS)
 - Semicolons separate simple statements on one line: `a = 1; b = 2`
 - One-line bodies: `if x: y = 1`, `for i in xs: print(i)`, `def f(): return 1`
-- Runaway recursion raises a catchable `RecursionError` at 1,000 nested calls (100 when each level goes through a built-in callback, such as a recursive `sorted` key)
+- Runaway recursion raises a catchable `RecursionError` at 1,000 nested calls (500 when each level goes through a built-in callback, such as a recursive `sorted` key or an `lru_cache` wrapper)
 
 ### Built-ins
 Working: `len`, `range` *(lazy, like CPython)*, `print` *(with `sep`/`end` kwargs)*, `abs`, `min` / `max` *(with `key=` and `default=`)*, `sum`, `round` *(banker's rounding)*, `sorted`, `reversed`, `enumerate` *(with `start=`)*, `zip`, `map`, `filter`, `any`, `all`, `type`, `isinstance` *(accepts types and tuples of types)*, `issubclass`, `repr`, `ascii`, `format`, `hex`, `oct`, `bin`, `ord`, `chr`, `pow` *(with optional modulo)*, `divmod`, `callable`, `iter`, `next`, `hash`, `id`, `getattr`, `hasattr`, and the type constructors `int`, `float`, `str`, `bool`, `list`, `tuple`, `dict`, `set`, `slice`.
@@ -452,7 +452,7 @@ Backed by JavaScript `RegExp` — Python patterns are translated to the JS diale
 
 ### Optional modules
 
-Three more modules ship with the package as separate entry points. A host passes them in with `createInterpreter({ modules: [json, itertools, collections] })`; without that, importing them raises `ModuleNotFoundError` like any other module.
+Six more modules ship with the package as separate entry points. A host passes them in with `createInterpreter({ modules: [json, itertools, collections, functools, string, random] })`; without that, importing them raises `ModuleNotFoundError` like any other module.
 
 #### `json`
 
@@ -478,11 +478,42 @@ Three more modules ship with the package as separate entry points. A host passes
 | `deque` | `append`/`appendleft`, `pop`/`popleft`, `extend`/`extendleft`, `rotate`, `clear`, `count`, `index`, `remove`, `reverse`, `copy`, `maxlen`, indexing, `len`, iteration, `in` |
 | `namedtuple` | Field access, `_fields`, `_asdict`, `_replace`, `defaults=`; instances are tuples |
 
+#### `functools`
+
+| Feature | Does | TS analogue |
+|---|---|---|
+| `reduce(fn, iterable[, initial])` | Fold left; the callback may call a tool | `arr.reduce(fn, initial)` |
+| `partial(fn, *args, **kwargs)` | Bind leading positional and keyword arguments; `.func`, `.args`, `.keywords`; a partial of a partial flattens | `fn.bind(null, ...args)` |
+| `lru_cache(maxsize=128, typed=False)`, `@lru_cache`, `@cache` | Memoize on the argument values; `cache_info()`, `cache_clear()`, `cache_parameters()`, `__wrapped__`; unhashable arguments raise `TypeError` | A `Map` keyed by the arguments |
+| `cmp_to_key(cmp)` | Key objects for `sorted`, `list.sort`, `min`, `max` and `<`; `cmp` may call a tool | `arr.sort(cmp)` |
+| `wraps`, `update_wrapper` | Return the wrapper unchanged (functions carry no `__name__`/`__doc__` to copy) | — |
+
+Not included: `total_ordering`, `singledispatch`, `cached_property` (all need classes). A cached recursive function re-enters the interpreter once per level, so recursion through `lru_cache` is limited to 500 levels instead of 1,000.
+
+#### `string`
+
+`ascii_letters`, `ascii_lowercase`, `ascii_uppercase`, `digits`, `hexdigits`, `octdigits`, `punctuation`, `printable`, `whitespace`, and `capwords(s, sep=None)`. Not included: `Template`, `Formatter` (classes).
+
+#### `random`
+
+A port of CPython's Mersenne Twister and its `_randbelow` rejection step, so every function below gives CPython's output for the same int seed.
+
+| Feature | Does | TS analogue |
+|---|---|---|
+| `seed(a=None)` | `None` reseeds from OS entropy; an `int` of any size reseeds deterministically. `str`/`float` seeds raise `TypeError` | — |
+| `random()`, `uniform(a, b)`, `triangular(low, high, mode)` | Floats | `Math.random()` |
+| `randint(a, b)`, `randrange(start, stop, step)`, `getrandbits(k)` | Exact ints of any size | — |
+| `choice(seq)`, `choices(population, weights=, cum_weights=, k=)`, `sample(population, k, counts=)`, `shuffle(list)` | On lists, tuples, strings and ranges; `shuffle` is in place on lists | — |
+| `gauss`, `normalvariate`, `expovariate` | Distributions, matching CPython digit for digit | — |
+| `Random(seed=None)` | An independent generator with the same methods | — |
+
+Each interpreter owns one generator (fresh entropy per `createInterpreter`, state kept across `run()` calls). Not included: `getstate`/`setstate`, `randbytes`, `betavariate`/`gammavariate`/`lognormvariate`/`vonmisesvariate`/`paretovariate`/`weibullvariate`, `binomialvariate`.
+
 ---
 
 ## ❌ Known Missing Features
 
-See `missing.md` for the full list and the reasons. The big ones are `class` definitions, the `with` statement, `match`, `async`/`await`, and every module outside `datetime`, `math`, `statistics` and `re`.
+See `missing.md` for the full list and the reasons. The big ones are `class` definitions, the `with` statement, `match`, `async`/`await`, and every module outside `datetime`, `math`, `statistics`, `re` and the six optional ones above.
 
 ---
 

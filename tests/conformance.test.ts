@@ -10,8 +10,11 @@
 import { describe, test, expect } from 'bun:test';
 import { createInterpreter } from '../src';
 import { collections } from '../src/collections';
+import { functools } from '../src/functools';
 import { itertools } from '../src/itertools';
 import { json } from '../src/json';
+import { random } from '../src/random';
+import { string } from '../src/string';
 import { cases } from './conformance/cases';
 import expected from './conformance/expected.json';
 
@@ -22,7 +25,7 @@ interface Outcome {
 
 async function run(code: string): Promise<Outcome> {
   const lines: string[] = [];
-  const interpreter = createInterpreter({ onPrint: (line) => lines.push(line), timeoutMs: 5000, modules: [json, itertools, collections] });
+  const interpreter = createInterpreter({ onPrint: (line) => lines.push(line), timeoutMs: 5000, modules: [json, itertools, collections, functools, string, random] });
   let error: Outcome['error'] = null;
   try {
     await interpreter.run(code);

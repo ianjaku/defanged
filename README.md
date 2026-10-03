@@ -108,7 +108,7 @@ A quick overview — see [`FEATURES.md`](./FEATURES.md) for the authoritative li
 - Generators with `yield`, `yield from` and `send()`. `map`, `filter`, `zip` and `enumerate` are lazy.
 - Exceptions are objects. `except ValueError as e` gives you `str(e)`, `e.args` and `type(e).__name__`, and the classes form CPython's hierarchy (`except LookupError` catches a `KeyError`).
 - The `datetime` module (`datetime`, `date`, `timedelta`, naive, with a host-configurable clock and session timezone), `math`, `statistics`, and `re` (backed by JS `RegExp`, dialect caveats in `FEATURES.md`).
-- Opt-in modules you register from the host: `json`, `itertools` and `collections` (`Counter`, `defaultdict`, `OrderedDict`, `deque`, `namedtuple`). See "Optional modules" below.
+- Opt-in modules you register from the host: `json`, `itertools`, `collections` (`Counter`, `defaultdict`, `OrderedDict`, `deque`, `namedtuple`), `functools` (`reduce`, `partial`, `lru_cache`, `cmp_to_key`), `string` and `random` (CPython's Mersenne Twister, so seeded runs match). See "Optional modules" below.
 - About 50 built-ins (`len`, `range`, `sum`, `sorted`, `enumerate`, `zip`, `map`, `filter`, `any`, `all`, `print`, `isinstance`, `getattr`, `format`, `round`, ...).
 
 ### Not supported
@@ -157,7 +157,7 @@ Everything else is meant to match CPython 3.14, and `tests/conformance` checks t
 | Module imports         | Whitelist only (`datetime`, `math`, `statistics`, `re`), all pure computation |
 | Introspection escape   | Absent (no `globals()`, `locals()`, `__dict__`)          |
 | Infinite loops / DoS   | Bounded by `maxIterations` (default 5,000,000 loop iterations, and separately 5,000,000 function calls) and `timeoutMs` (wall-clock, opt-in) |
-| Runaway recursion      | A catchable `RecursionError` at 1,000 nested calls, or at 100 levels when the recursion goes through a built-in callback such as a `sorted` key. Plain Python calls do not use the JS stack |
+| Runaway recursion      | A catchable `RecursionError` at 1,000 nested calls, or at 500 levels when the recursion goes through a built-in callback such as a `sorted` key or an `lru_cache` wrapper. Plain Python calls do not use the JS stack |
 | Host memory exhaustion | Bounded by `limits` — single-step allocations (`[0] * 10**9`, `"x" * 10**9`, `list(range(10**9))`, `join`, `ljust`/`center`/`zfill`, huge ints) fail with a Python `MemoryError` instead of OOMing the process |
 | Host CPU exhaustion    | Bounded by the iteration and call budgets + optional wall-clock deadline |
 | Prototype pollution    | A dict key named `__proto__` stays an ordinary own property on results and tool arguments |
@@ -193,7 +193,7 @@ Long-lived interpreter. Options:
 
 ### Optional modules
 
-`json`, `itertools` and `collections` ship with the package but stay out of the core bundle. Import the ones you want and pass them in:
+`json`, `itertools`, `collections`, `functools`, `string` and `random` ship with the package but stay out of the core bundle. Import the ones you want and pass them in:
 
 ```typescript
 import { createInterpreter } from "defanged";
@@ -209,9 +209,11 @@ json.dumps(Counter("abracadabra").most_common(2))
 `); // '[["a", 5], ["b", 2]]'
 ```
 
-Each one is pure computation, so the safety boundary does not move. `json` has `dumps` and `loads` (`load`/`dump` take files and do not exist). `itertools` has the lazy iterators (`chain`, `groupby`, `product`, `permutations`, `combinations`, `accumulate`, `islice`, `zip_longest`, `batched`, ...). `collections` has `Counter`, `defaultdict`, `OrderedDict`, `deque` and `namedtuple`. `FEATURES.md` lists what each supports.
+Each one is pure computation, so the safety boundary does not move. `json` has `dumps` and `loads` (`load`/`dump` take files and do not exist). `itertools` has the lazy iterators (`chain`, `groupby`, `product`, `permutations`, `combinations`, `accumulate`, `islice`, `zip_longest`, `batched`, ...). `collections` has `Counter`, `defaultdict`, `OrderedDict`, `deque` and `namedtuple`. `functools` has `reduce`, `partial`, `lru_cache`/`cache`, `cmp_to_key` and `wraps`. `string` has the character constants and `capwords`. `FEATURES.md` lists what each supports.
 
-A module is a `PyModule` built from the value classes the package exports. That API exists so the three above can live outside the core; it is not yet documented or stable for third-party modules.
+`random` is a port of CPython's generator (Mersenne Twister), so `random.seed(42)` followed by `randint`, `shuffle`, `sample`, `gauss` or any other function gives the numbers CPython gives. Unseeded, each interpreter starts from OS entropy and keeps its own generator between runs, the way one Python process does. Only `int` seeds are accepted; CPython hashes `str` seeds with SHA-512, which is not ported.
+
+A module is a `PyModule` built from the value classes the package exports. That API exists so the six above can live outside the core; it is not yet documented or stable for third-party modules.
 
 ### `ToolDefinition`
 
@@ -286,7 +288,7 @@ source code ──► lexer ──► parser ──► compiler ──► VM ─
 - `src/ops.ts`, `src/format.ts` — operators, and the three string-formatting styles
 - `src/builtins.ts`, `src/methods.ts` — built-in functions and the methods of `str`/`list`/`dict`/`set`
 - `src/datetime.ts`, `src/math.ts`, `src/statistics.ts`, `src/re.ts` — the built-in modules
-- `src/json.ts`, `src/itertools.ts`, `src/collections.ts` — the optional modules, each its own entry point
+- `src/json.ts`, `src/itertools.ts`, `src/collections.ts`, `src/functools.ts`, `src/string.ts`, `src/random.ts` — the optional modules, each its own entry point
 - `src/errors.ts` — the exception classes
 - `src/interpreter.ts` — the public `Interpreter`: options, tools, `run()`
 

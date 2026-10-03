@@ -12,7 +12,7 @@ import {
 } from './errors';
 import { strFormat } from './format';
 import { PyFloat, bitLength, isIntLike } from './numbers';
-import { asIndex, getItem } from './ops';
+import { asIndex, getItem, objectOrder } from './ops';
 import {
   DONE, Kwargs, MA, PyBuiltin, PyDate, PyDateTime, PyDict, PyDictView, PyFunction, PyGenerator, PyList,
   PyModule, PyObject, PySet, PyTimeDelta, PyTuple, PyType, PyValue, Runtime,
@@ -85,11 +85,41 @@ async function mapCallAsync(
   return out;
 }
 
+/** Stable merge sort for comparisons that may wait on Python (cmp_to_key).
+ *  Equal elements keep their order: the left run wins ties. */
+function mergeSort(indices: number[], cmp: (a: number, b: number) => MA<number>): MA<number[]> {
+  if (indices.length <= 1) return indices;
+  const mid = indices.length >> 1;
+  return andThen(mergeSort(indices.slice(0, mid), cmp), (left) =>
+    andThen(mergeSort(indices.slice(mid), cmp), (right) => {
+      const out: number[] = [];
+      let i = 0;
+      let j = 0;
+      const take = (c: number): void => { out.push(c <= 0 ? left[i++] : right[j++]); };
+      const merge = (): MA<number[]> => {
+        while (i < left.length && j < right.length) {
+          const c = cmp(left[i], right[j]);
+          if (c instanceof Promise) return c.then((n) => { take(n); return merge(); });
+          take(c);
+        }
+        while (i < left.length) out.push(left[i++]);
+        while (j < right.length) out.push(right[j++]);
+        return out;
+      };
+      return merge();
+    }));
+}
+
 /** A new array with `items` in sorted order. Stable, like Python's sort:
  *  equal items keep their original order, also under `reverse`. */
 export function sortItems(rt: Runtime, items: PyValue[], key: PyValue | undefined, reverse: boolean): MA<PyValue[]> {
-  const order = (keys: PyValue[]): PyValue[] => {
+  const order = (keys: PyValue[]): MA<PyValue[]> => {
     const indices = items.map((_, i) => i);
+    if (keys.some((k) => k instanceof PyObject)) {
+      const cmp = (a: number, b: number): MA<number> =>
+        andThen(objectOrder(rt, '<', keys[a], keys[b]), (c) => (reverse ? -c : c));
+      return andThen(mergeSort(indices, cmp), (sorted) => sorted.map((i) => items[i]));
+    }
     indices.sort((a, b) => {
       const c = sortCompare(keys[a], keys[b]);
       return c !== 0 ? (reverse ? -c : c) : a - b;

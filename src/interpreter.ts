@@ -116,7 +116,7 @@ export class Interpreter {
     ]);
     for (const module of options.modules ?? []) {
       if (modules.has(module.name)) throw new Error(`Module '${module.name}' is already provided by defanged`);
-      modules.set(module.name, module);
+      modules.set(module.name, module.fresh ? module.fresh() : module);
     }
 
     this.host = {

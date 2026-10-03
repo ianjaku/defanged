@@ -202,7 +202,12 @@ export class PyType {
 }
 
 export class PyModule {
-  constructor(public readonly name: string, public readonly attrs: Map<string, PyValue>) {}
+  constructor(
+    public readonly name: string,
+    public readonly attrs: Map<string, PyValue>,
+    /** For a module with state (`random`): builds the copy one interpreter owns. */
+    public readonly fresh: (() => PyModule) | null = null,
+  ) {}
 }
 
 /** Base for objects defined by modules (regex patterns, match objects). */
@@ -221,6 +226,11 @@ export abstract class PyObject {
   }
   /** The items `for x in obj` visits; undefined means not iterable. */
   iterate(): PyValue[] | undefined {
+    return undefined;
+  }
+  /** Three-way ordering against `other` for `<` and sorting; undefined means
+   *  the two cannot be ordered. May wait, since it can call back into Python. */
+  compareTo(_rt: Runtime, _other: PyValue, _op: OrderOp): MA<number> | undefined {
     return undefined;
   }
   repr(): string {
@@ -455,7 +465,7 @@ export function isSubset(a: PySet, b: PySet): boolean {
 
 export type OrderOp = '<' | '>' | '<=' | '>=';
 
-function orderResult(op: OrderOp, c: number): boolean {
+export function orderResult(op: OrderOp, c: number): boolean {
   switch (op) {
     case '<': return c < 0;
     case '>': return c > 0;
